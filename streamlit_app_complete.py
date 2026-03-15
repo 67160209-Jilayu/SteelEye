@@ -7,7 +7,7 @@ import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 from core import MainSystem, UniqueRuntimeSystem
-import os, time, io, zipfile, json
+import os, io, zipfile, json
 from datetime import datetime
 from setup import setup_directories, setup_user_history
 from state_manager import initialize_runtime
@@ -46,12 +46,12 @@ p, span, label, div { color: #C8C8C8 !important; }
 }
 .stDownloadButton > button:hover { background: #174F33; }
 
-/* cards */
+/* card */
 .se-card {
     background: #1C1F27; border: 1px solid #2A2D36;
     border-radius: 10px; padding: 18px 20px; margin-bottom: 10px;
 }
-.se-stat-num { font-size: 32px; font-weight: 700; color: #F0F0F0 !important; margin: 0; line-height: 1; }
+.se-stat-num   { font-size: 32px; font-weight: 700; color: #F0F0F0 !important; margin: 0; line-height: 1; }
 .se-stat-label { font-size: 12px; color: #777 !important; margin: 4px 0 0 0; }
 
 /* chips */
@@ -61,45 +61,37 @@ p, span, label, div { color: #C8C8C8 !important; }
 
 /* history table */
 .hist-head {
-    display: grid; grid-template-columns: 140px 1fr 120px 100px 80px;
-    align-items: center; gap: 12px; padding: 8px 16px;
-    background: #14161D; border-radius: 8px 8px 0 0;
-    font-size: 11px; font-weight: 600; color: #555 !important;
-    text-transform: uppercase; letter-spacing: 0.06em;
+    display:grid; grid-template-columns:140px 1fr 120px 100px 80px;
+    align-items:center; gap:12px; padding:8px 16px;
+    background:#14161D; border-radius:8px 8px 0 0;
+    font-size:11px; font-weight:600; color:#555 !important;
+    text-transform:uppercase; letter-spacing:0.06em;
 }
 .hist-row {
-    display: grid; grid-template-columns: 140px 1fr 120px 100px 80px;
-    align-items: center; gap: 12px; padding: 10px 16px;
-    border-bottom: 1px solid #252830; font-size: 13px;
+    display:grid; grid-template-columns:140px 1fr 120px 100px 80px;
+    align-items:center; gap:12px; padding:10px 16px;
+    border-bottom:1px solid #252830; font-size:13px;
 }
-.hist-row:hover { background: #1E2130; }
+.hist-row:hover { background:#1E2130; }
 
-/* live dot */
-.live-dot {
-    display:inline-block; width:8px; height:8px; border-radius:50%;
-    background:#EF4444; animation:blink 1.2s infinite;
+/* camera guide */
+.cam-guide {
+    background:#1C1F27; border:1px solid #2A2D36;
+    border-left:3px solid #E07B00;
+    border-radius:8px; padding:12px 16px; margin-bottom:14px;
+    font-size:13px; color:#C8C8C8 !important;
 }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
-/* notice box สำหรับคำแนะนำกล้อง */
-.camera-guide {
-    background: #1C1F27; border: 1px solid #3A3D4A;
-    border-left: 3px solid #E07B00;
-    border-radius: 8px; padding: 14px 18px; margin-bottom: 16px;
-}
-.camera-guide p { margin: 0; font-size: 13px; color: #C8C8C8 !important; }
-.camera-guide .step { color: #E07B00 !important; font-weight: 700; }
+.cam-guide b { color:#E07B00 !important; }
 
 /* page title */
 .se-title {
-    font-size: 22px; font-weight: 700; color: #F0F0F0 !important;
-    border-left: 3px solid #E07B00; padding-left: 12px; margin-bottom: 20px;
+    font-size:20px; font-weight:700; color:#F0F0F0 !important;
+    border-left:3px solid #E07B00; padding-left:12px; margin-bottom:20px;
 }
 
 /* login */
-.login-wrap { max-width: 380px; margin: 60px auto 0; }
-.login-logo { font-size: 36px; font-weight: 800; color: #E07B00 !important; letter-spacing: -1px; }
-.login-sub  { font-size: 13px; color: #666 !important; margin: 4px 0 32px; }
+.login-logo { font-size:34px; font-weight:800; color:#E07B00 !important; letter-spacing:-1px; }
+.login-sub  { font-size:13px; color:#555 !important; margin:2px 0 28px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -112,14 +104,14 @@ setup_user_history()
 
 for _k, _v in {
     "authenticated": False, "username": None,
-    "user_data": None, "model": None, "live_running": False,
+    "user_data": None, "model": None,
 }.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
 
 # ─────────────────────────────────────────────────────────────
-# MODEL HELPERS
+# MODEL
 # ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_model():
@@ -148,10 +140,9 @@ def ensure_runtime() -> bool:
 
 
 # ─────────────────────────────────────────────────────────────
-# ANALYSIS RUNNERS
+# ANALYSIS
 # ─────────────────────────────────────────────────────────────
 def _collect_output_images(image_names: list, output_basket: str) -> list:
-    """โหลดรูป annotated จาก output basket"""
     images = []
     for name in image_names:
         path = os.path.join(output_basket, name)
@@ -164,10 +155,9 @@ def _collect_output_images(image_names: list, output_basket: str) -> list:
 
 
 def run_analysis_files(uploaded_files: list) -> tuple:
-    """วิเคราะห์จากไฟล์ที่ upload → (list[PIL.Image], dict)"""
     if not ensure_runtime():
         raise RuntimeError("Runtime not ready")
-    main_sys: MainSystem         = st.session_state.main_system
+    main_sys: MainSystem          = st.session_state.main_system
     runtime:  UniqueRuntimeSystem = st.session_state.unique_runtime
 
     file_names = []
@@ -187,10 +177,9 @@ def run_analysis_files(uploaded_files: list) -> tuple:
 
 
 def run_analysis_pil(pil_image: Image.Image, filename: str = "webcam_frame.jpg") -> tuple:
-    """วิเคราะห์จาก PIL Image (ใช้กับกล้อง) → (list[PIL.Image], dict)"""
     if not ensure_runtime():
         raise RuntimeError("Runtime not ready")
-    main_sys: MainSystem         = st.session_state.main_system
+    main_sys: MainSystem          = st.session_state.main_system
     runtime:  UniqueRuntimeSystem = st.session_state.unique_runtime
 
     if pil_image.mode in ("RGBA", "P"):
@@ -208,7 +197,7 @@ def run_analysis_pil(pil_image: Image.Image, filename: str = "webcam_frame.jpg")
 
 
 # ─────────────────────────────────────────────────────────────
-# ZIP / HISTORY HELPERS
+# ZIP / HISTORY
 # ─────────────────────────────────────────────────────────────
 def build_zip(images: list, result_dict: dict, label: str = "result") -> bytes:
     buf = io.BytesIO()
@@ -232,7 +221,6 @@ def build_zip(images: list, result_dict: dict, label: str = "result") -> bytes:
 
 
 def load_output_images_for_history(result_dict: dict) -> list:
-    """โหลดรูป annotated จาก output basket สำหรับ history download"""
     output_dir = "image_basket/output"
     images = []
     for filename in result_dict.keys():
@@ -248,7 +236,6 @@ def load_output_images_for_history(result_dict: dict) -> list:
 
 
 def save_analysis(username: str, filename: str, raw: dict):
-    """บันทึกผลลงประวัติ"""
     auth.save_user_analysis(username, {
         "filename":  filename,
         "results":   raw,
@@ -260,7 +247,6 @@ def save_analysis(username: str, filename: str, raw: dict):
 # UI COMPONENTS
 # ─────────────────────────────────────────────────────────────
 def _count_chips(counts: dict) -> str:
-    """สร้าง HTML chip สำหรับแต่ละประเภทเหล็ก"""
     parts = []
     for cls, cnt in counts.items():
         css = "chip-bar" if "กล่อง" in cls else "chip-rod"
@@ -269,23 +255,22 @@ def _count_chips(counts: dict) -> str:
 
 
 def render_result_stats(raw: dict):
-    """แสดง card สรุปผลการนับแต่ละภาพ"""
+    """card สรุปผลการนับแต่ละภาพ"""
     for img_name, det in raw.items():
         conf   = det.get("avg_confident", 0)
         counts = {k: v for k, v in det.items() if k != "avg_confident"}
-        chips  = _count_chips(counts)
         total  = sum(counts.values())
         st.markdown(f"""
         <div class="se-card">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
                 <div>
-                    <p style="font-size:12px;color:#666!important;margin:0 0 6px 0;">{img_name}</p>
-                    <div>{chips}</div>
+                    <p style="font-size:11px;color:#555!important;margin:0 0 8px 0;">{img_name}</p>
+                    <div>{_count_chips(counts)}</div>
                 </div>
                 <div style="text-align:right;flex-shrink:0;">
                     <p class="se-stat-num">{total}</p>
                     <p class="se-stat-label">ชิ้นรวม</p>
-                    <p style="font-size:11px;color:#555!important;margin:6px 0 0 0;">ความแม่นยำ {conf:.0%}</p>
+                    <p style="font-size:11px;color:#555!important;margin:6px 0 0 0;">{conf:.0%}</p>
                 </div>
             </div>
         </div>
@@ -293,11 +278,11 @@ def render_result_stats(raw: dict):
 
 
 def render_result_block(result_imgs: list, result_raw: dict, key_prefix: str):
-    """แสดงรูป annotated + stats card + ปุ่ม download"""
+    """รูป annotated + stats + download"""
     st.divider()
     st.markdown('<p class="se-title">ผลการตรวจนับ</p>', unsafe_allow_html=True)
-    img_col, stat_col = st.columns([1.4, 0.6])
 
+    img_col, stat_col = st.columns([1.5, 0.5])
     with img_col:
         if result_imgs:
             cols = st.columns(min(len(result_imgs), 3))
@@ -306,28 +291,24 @@ def render_result_block(result_imgs: list, result_raw: dict, key_prefix: str):
                     st.image(img, use_container_width=True)
         else:
             st.info("ไม่มีรูป output")
-
-        zip_bytes = build_zip(result_imgs, result_raw, key_prefix)
         st.download_button(
             label="ดาวน์โหลดผล (ZIP)",
-            data=zip_bytes,
+            data=build_zip(result_imgs, result_raw, key_prefix),
             file_name=f"steel_eye_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
             mime="application/zip",
             key=f"dl_{key_prefix}_{id(result_raw)}",
             use_container_width=True,
         )
-
     with stat_col:
         render_result_stats(result_raw)
 
 
 # ─────────────────────────────────────────────────────────────
-# LOGIN PAGE
+# LOGIN
 # ─────────────────────────────────────────────────────────────
 def show_login_page():
-    _, col, _ = st.columns([1, 1.2, 1])
+    _, col, _ = st.columns([1, 1, 1])
     with col:
-        st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
         st.markdown('<p class="login-logo">Steel Eye</p>', unsafe_allow_html=True)
         st.markdown('<p class="login-sub">ระบบ AI นับและแยกประเภทเหล็ก</p>', unsafe_allow_html=True)
 
@@ -350,9 +331,9 @@ def show_login_page():
                     st.warning("กรุณากรอกชื่อผู้ใช้และรหัสผ่าน")
 
         with tab_reg:
-            ru = st.text_input("ชื่อผู้ใช้",    placeholder="เลือก username",     key="reg_u")
+            ru = st.text_input("ชื่อผู้ใช้",    placeholder="เลือก username",      key="reg_u")
             rp = st.text_input("รหัสผ่าน",      type="password", placeholder="อย่างน้อย 6 ตัว", key="reg_p")
-            rf = st.text_input("ชื่อ-นามสกุล", placeholder="ชื่อของคุณ",          key="reg_f")
+            rf = st.text_input("ชื่อ-นามสกุล", placeholder="ชื่อของคุณ",           key="reg_f")
             if st.button("สมัครสมาชิก", use_container_width=True, key="btn_reg"):
                 if ru and rp and rf:
                     res = auth.register(ru, rp, rf)
@@ -363,193 +344,6 @@ def show_login_page():
                 else:
                     st.warning("กรุณากรอกข้อมูลให้ครบ")
 
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-# ─────────────────────────────────────────────────────────────
-# CAMERA MODES
-# ─────────────────────────────────────────────────────────────
-def _render_snapshot_mode(result_key_imgs: str, result_key_raw: str, page_label: str):
-    """
-    โหมดถ่ายภาพ — user กดปุ่มกล้องใน widget แล้วกด 'ตรวจนับ'
-    แสดงคำแนะนำให้ชัดเจนว่าต้องทำอะไร
-    """
-    st.markdown("""
-    <div class="camera-guide">
-        <p><span class="step">วิธีใช้</span> &nbsp;
-        1. กดปุ่ม <b>Take photo</b> ในกล้องด้านล่าง &nbsp;→&nbsp;
-        2. กดปุ่ม <b>ตรวจนับ</b> เพื่อวิเคราะห์</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    cam_img = st.camera_input(
-        "กดปุ่ม Take photo เพื่อถ่ายภาพ",
-        key=f"{page_label}_snap_input",
-    )
-
-    if cam_img is None:
-        st.caption("หากกล้องไม่ขึ้น ให้อนุญาต Camera permission ในเบราว์เซอร์")
-        st.session_state.pop(result_key_imgs, None)
-        st.session_state.pop(result_key_raw,  None)
-        return
-
-    # มีภาพแล้ว — แสดงปุ่ม ตรวจนับ
-    _, btn_col, _ = st.columns([1, 1, 1])
-    with btn_col:
-        if st.button("ตรวจนับ", use_container_width=True, key=f"{page_label}_snap_btn"):
-            with st.spinner("กำลังประมวลผล..."):
-                try:
-                    fname = f"snap_{page_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                    imgs, raw = run_analysis_pil(Image.open(cam_img), fname)
-                    st.session_state[result_key_imgs] = imgs
-                    st.session_state[result_key_raw]  = raw
-                    save_analysis(st.session_state.username, fname, raw)
-                except Exception as e:
-                    st.error(f"เกิดข้อผิดพลาด: {e}")
-
-    # แสดงผล
-    if st.session_state.get(result_key_imgs) is not None and \
-            st.session_state.get(result_key_raw) is not None:
-        render_result_block(
-            st.session_state[result_key_imgs],
-            st.session_state[result_key_raw],
-            f"{page_label}_snap",
-        )
-
-
-def _render_live_mode(result_key_imgs: str, result_key_raw: str, page_label: str):
-    """
-    โหมด Live — กล้องถ่ายต่อเนื่อง วิเคราะห์อัตโนมัติทุก N วินาที
-    user ต้องกด Take photo ใน widget ทุกรอบ (ข้อจำกัดของ st.camera_input)
-    แสดงคำแนะนำให้ชัดเพื่อไม่ให้สับสน
-    """
-    # Live badge
-    st.markdown("""
-    <div style="display:inline-flex;align-items:center;gap:8px;
-                background:#1C1F27;border:1px solid #3A1515;
-                border-radius:8px;padding:8px 14px;margin-bottom:4px;">
-        <span class="live-dot"></span>
-        <span style="font-size:13px;font-weight:600;color:#EF4444!important;">LIVE</span>
-        <span style="font-size:12px;color:#888!important;">โหมดวิเคราะห์ต่อเนื่อง</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # คำแนะนำ
-    st.markdown("""
-    <div class="camera-guide">
-        <p><span class="step">วิธีใช้</span> &nbsp;
-        1. กด <b>เริ่ม</b> &nbsp;→&nbsp;
-        2. กดปุ่ม <b>Take photo</b> ในกล้องด้านล่าง &nbsp;→&nbsp;
-        3. ระบบวิเคราะห์อัตโนมัติ ทำซ้ำได้เรื่อยๆ &nbsp;→&nbsp;
-        4. กด <b>หยุด</b> เมื่อเสร็จ</p>
-        <p style="margin:6px 0 0 0;font-size:12px;color:#666!important;">
-        หมายเหตุ: ต้องกด Take photo ทุกรอบเนื่องจากข้อจำกัดของเบราว์เซอร์
-        — ระบบจะวิเคราะห์ให้อัตโนมัติหลังกด</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    interval = st.slider(
-        "ความถี่วิเคราะห์ (วินาที/ครั้ง)", 1, 10, 3,
-        key=f"{page_label}_live_interval",
-    )
-
-    col_s, col_e = st.columns(2)
-    with col_s:
-        if st.button("เริ่ม", use_container_width=True,
-                     key=f"{page_label}_live_start",
-                     disabled=st.session_state.live_running):
-            st.session_state.live_running = True
-            st.rerun()
-    with col_e:
-        if st.button("หยุด", use_container_width=True,
-                     key=f"{page_label}_live_stop",
-                     disabled=not st.session_state.live_running):
-            st.session_state.live_running = False
-            st.rerun()
-
-    frame_ph  = st.empty()
-    stats_ph  = st.empty()
-    status_ph = st.empty()
-
-    if not st.session_state.live_running:
-        # หยุดอยู่ — แสดงผลล่าสุดถ้ามี
-        if st.session_state.get(result_key_imgs):
-            frame_ph.image(
-                st.session_state[result_key_imgs],
-                use_container_width=True,
-                caption="ผลล่าสุด",
-            )
-        else:
-            status_ph.info("กด 'เริ่ม' เพื่อเริ่มวิเคราะห์")
-        return
-
-    # กำลัง live อยู่
-    status_ph.info("กำลังรอภาพ — กด Take photo ในกล้องด้านล่าง")
-
-    # key เปลี่ยนทุก interval วินาที → Streamlit reset widget → รับภาพใหม่ได้
-    live_frame = st.camera_input(
-        "กด Take photo เพื่อส่งภาพวิเคราะห์",
-        key=f"{page_label}_live_cam_{int(time.time() // interval)}",
-    )
-
-    if live_frame is not None:
-        try:
-            fname = f"live_{page_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-            imgs, raw = run_analysis_pil(Image.open(live_frame), fname)
-
-            # แสดงรูป annotated
-            with frame_ph.container():
-                if imgs:
-                    c = st.columns(min(len(imgs), 3))
-                    for i, img in enumerate(imgs):
-                        with c[i % 3]:
-                            st.image(img, use_container_width=True)
-                else:
-                    st.image(Image.open(live_frame), use_container_width=True)
-
-            # แสดง stats
-            with stats_ph.container():
-                render_result_stats(raw)
-
-            status_ph.success(
-                f"วิเคราะห์เสร็จ {datetime.now().strftime('%H:%M:%S')} "
-                f"— กด Take photo อีกครั้งเพื่อวิเคราะห์รอบถัดไป"
-            )
-
-            # บันทึกเฉพาะรอบที่พบเหล็ก
-            has_steel = any(
-                any(k != "avg_confident" for k in det)
-                for det in raw.values()
-            )
-            if has_steel:
-                save_analysis(st.session_state.username, fname, raw)
-                st.session_state[result_key_imgs] = imgs
-                st.session_state[result_key_raw]  = raw
-
-        except Exception as e:
-            status_ph.error(f"เกิดข้อผิดพลาด: {e}")
-
-    # rerun หลัง interval เพื่อ reset camera widget ให้ถ่ายรูปใหม่ได้
-    time.sleep(interval)
-    st.rerun()
-
-
-def render_camera_section(result_key_imgs: str, result_key_raw: str, page_label: str):
-    """entry point สำหรับ section กล้อง — เลือก mode แล้ว dispatch"""
-    mode = st.radio(
-        "เลือกโหมด",
-        ["ถ่ายภาพ", "สตรีมสด"],
-        horizontal=True,
-        key=f"{page_label}_cam_mode",
-        captions=["ถ่ายครั้งเดียว กด ตรวจนับ", "วิเคราะห์ต่อเนื่องอัตโนมัติ"],
-    )
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-    if mode == "ถ่ายภาพ":
-        _render_snapshot_mode(result_key_imgs, result_key_raw, page_label)
-    else:
-        _render_live_mode(result_key_imgs, result_key_raw, page_label)
-
 
 # ─────────────────────────────────────────────────────────────
 # PAGES
@@ -557,35 +351,38 @@ def render_camera_section(result_key_imgs: str, result_key_raw: str, page_label:
 def page_home():
     st.markdown('<p class="se-title">ตรวจนับเหล็ก</p>', unsafe_allow_html=True)
 
+    # เลือกวิธีนำเข้าภาพ — 2 โหมดเท่านั้น (ลบ live ออก)
     input_mode = st.radio(
         "วิธีนำเข้าภาพ",
-        ["อัปโหลดไฟล์", "ถ่ายภาพ", "สตรีมสด"],
+        ["อัปโหลดไฟล์", "ถ่ายภาพจากกล้อง"],
         horizontal=True,
         key="home_input_mode",
-        captions=["เลือกไฟล์จากเครื่อง", "ถ่ายครั้งเดียว", "วิเคราะห์ต่อเนื่อง"],
+        captions=["เลือกจากเครื่อง", "ใช้กล้องถ่ายทันที"],
     )
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
+    # ── โหมดอัปโหลด ──
     if input_mode == "อัปโหลดไฟล์":
         uploaded_files = st.file_uploader(
-            "เลือกรูป PNG/JPG (เลือกได้หลายรูป)",
+            "เลือกรูป PNG / JPG (เลือกได้หลายรูปพร้อมกัน)",
             type=["jpg", "jpeg", "png"],
             accept_multiple_files=True,
             key="home_uploader",
         )
 
-        # ล้างผลเก่าถ้ายังไม่มีไฟล์
         if not uploaded_files:
             st.session_state.pop("home_result_images", None)
             st.session_state.pop("home_result_raw",    None)
             return
 
-        # preview
+        # preview รูปที่เลือก
         st.caption(f"เลือก {len(uploaded_files)} ไฟล์")
         prev_cols = st.columns(min(len(uploaded_files), 4))
         for idx, uf in enumerate(uploaded_files):
             with prev_cols[idx % 4]:
                 st.image(uf, caption=uf.name, use_container_width=True)
 
+        # ปุ่มกลางหน้า
         _, btn_col, _ = st.columns([1, 1, 1])
         with btn_col:
             if st.button("ตรวจนับ", use_container_width=True, key="home_btn_analyze"):
@@ -610,15 +407,45 @@ def page_home():
                 "home_upload",
             )
 
+    # ── โหมดกล้อง ──
     else:
-        # ถ่ายภาพ หรือ สตรีมสด — ส่งตรงไป render_camera_section พร้อม force mode
-        forced_mode = "ถ่ายภาพ" if input_mode == "ถ่ายภาพ" else "สตรีมสด"
+        # คำแนะนำการใช้งาน
+        st.markdown("""
+        <div class="cam-guide">
+            กด <b>Take photo</b> ในกล้องด้านล่าง แล้วกดปุ่ม <b>ตรวจนับ</b>
+        </div>
+        """, unsafe_allow_html=True)
 
-        # สร้าง radio hidden ที่ค่าถูก force แล้ว (ป้องกัน key ชน)
-        if forced_mode == "ถ่ายภาพ":
-            _render_snapshot_mode("home_result_images", "home_result_raw", "home")
+        cam_img = st.camera_input(
+            "กดปุ่ม Take photo เพื่อถ่ายภาพ",
+            key="home_snap_input",
+        )
+
+        if cam_img is None:
+            st.caption("หากกล้องไม่ขึ้น ให้อนุญาต Camera permission ในเบราว์เซอร์")
+            st.session_state.pop("home_result_images", None)
+            st.session_state.pop("home_result_raw",    None)
         else:
-            _render_live_mode("home_result_images", "home_result_raw", "home")
+            _, btn_col, _ = st.columns([1, 1, 1])
+            with btn_col:
+                if st.button("ตรวจนับ", use_container_width=True, key="home_snap_btn"):
+                    with st.spinner("กำลังประมวลผล..."):
+                        try:
+                            fname = f"snap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                            imgs, raw = run_analysis_pil(Image.open(cam_img), fname)
+                            st.session_state.home_result_images = imgs
+                            st.session_state.home_result_raw    = raw
+                            save_analysis(st.session_state.username, fname, raw)
+                        except Exception as e:
+                            st.error(f"เกิดข้อผิดพลาด: {e}")
+
+            if st.session_state.get("home_result_images") is not None and \
+                    st.session_state.get("home_result_raw") is not None:
+                render_result_block(
+                    st.session_state["home_result_images"],
+                    st.session_state["home_result_raw"],
+                    "home_snap",
+                )
 
 
 def page_history():
@@ -635,7 +462,7 @@ def page_history():
     with f2:
         start_date = st.date_input("วันเริ่มต้น") if filter_type == "กำหนดเอง" else None
     with f3:
-        end_date = st.date_input("วันสิ้นสุด") if filter_type == "กำหนดเอง" else None
+        end_date = st.date_input("วันสิ้นสุด")   if filter_type == "กำหนดเอง" else None
 
     if filter_type == "ทั้งหมด":
         analyses = auth.get_user_analyses(st.session_state.username)
@@ -696,7 +523,7 @@ def page_history():
     for ts, analysis_data in analyses:
         record   = analysis_data.get("data", {})
         filename = record.get("filename", "—")
-        results  = record.get("results", {})
+        results  = record.get("results",  {})
 
         bar_cnt = rod_cnt = 0
         conf_vals = []
@@ -729,12 +556,13 @@ def page_history():
         </div>
         """, unsafe_allow_html=True)
 
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-    # ── download รายการล่าสุด ──
+    # ── download ──
     last_ts, last_ad = analyses[0]
     last_results = last_ad.get("data", {}).get("results", {})
     saved_imgs   = load_output_images_for_history(last_results)
+
     c_dl, _ = st.columns([1, 3])
     with c_dl:
         st.download_button(
@@ -746,12 +574,11 @@ def page_history():
             use_container_width=True,
         )
 
-    # ── download ทีละรายการ ──
     with st.expander("ดาวน์โหลดรายการอื่น"):
         for ts, analysis_data in analyses:
             record     = analysis_data.get("data", {})
             filename   = record.get("filename", "—")
-            results    = record.get("results", {})
+            results    = record.get("results",  {})
             dt_obj     = datetime.fromisoformat(ts)
             saved_imgs = load_output_images_for_history(results)
             img_note   = f"{len(saved_imgs)} ภาพ" if saved_imgs else "JSON only"
@@ -781,11 +608,11 @@ def page_settings():
         st.markdown("#### ข้อมูลบัญชี")
         st.markdown(f"""
         <div class="se-card">
-            <p style="color:#888!important;font-size:12px;margin:0 0 2px;">ชื่อผู้ใช้</p>
-            <p style="color:#F0F0F0!important;margin:0 0 12px;font-weight:600;">{st.session_state.username}</p>
-            <p style="color:#888!important;font-size:12px;margin:0 0 2px;">ชื่อ-นามสกุล</p>
-            <p style="color:#F0F0F0!important;margin:0 0 12px;font-weight:600;">{udata['full_name']}</p>
-            <p style="color:#888!important;font-size:12px;margin:0 0 2px;">สมัครเมื่อ</p>
+            <p style="color:#555!important;font-size:12px;margin:0 0 2px;">ชื่อผู้ใช้</p>
+            <p style="color:#F0F0F0!important;margin:0 0 14px;font-weight:600;">{st.session_state.username}</p>
+            <p style="color:#555!important;font-size:12px;margin:0 0 2px;">ชื่อ-นามสกุล</p>
+            <p style="color:#F0F0F0!important;margin:0 0 14px;font-weight:600;">{udata['full_name']}</p>
+            <p style="color:#555!important;font-size:12px;margin:0 0 2px;">สมัครเมื่อ</p>
             <p style="color:#F0F0F0!important;margin:0;font-weight:600;">{udata['created_at'][:10]}</p>
         </div>
         """, unsafe_allow_html=True)
@@ -795,6 +622,7 @@ def page_settings():
         old_p  = st.text_input("รหัสผ่านเดิม",      type="password", key="pwd_old")
         new_p  = st.text_input("รหัสผ่านใหม่",       type="password", key="pwd_new")
         conf_p = st.text_input("ยืนยันรหัสผ่านใหม่", type="password", key="pwd_conf")
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
         if st.button("บันทึก", use_container_width=True, key="btn_update_pwd"):
             if not (old_p and new_p and conf_p):
                 st.warning("กรุณากรอกข้อมูลให้ครบ")
@@ -812,7 +640,6 @@ def page_settings():
 # MAIN APP
 # ─────────────────────────────────────────────────────────────
 def show_main_app():
-    # ── sidebar ──
     with st.sidebar:
         udata = st.session_state.user_data
         st.markdown(f"""
@@ -834,28 +661,25 @@ def show_main_app():
         <div style="padding:0 4px;">
             <p style="font-size:11px;color:#555!important;margin:0 0 2px;">วันนี้</p>
             <p style="font-size:22px;font-weight:700;color:#E07B00!important;margin:0;">{today_count}</p>
-            <p style="font-size:11px;color:#555!important;margin:6px 0 2px;">ทั้งหมด</p>
+            <p style="font-size:11px;color:#555!important;margin:10px 0 2px;">ทั้งหมด</p>
             <p style="font-size:16px;font-weight:600;color:#C8C8C8!important;margin:0;">{len(all_analyses)}</p>
         </div>
         """, unsafe_allow_html=True)
         st.divider()
 
         if st.button("ออกจากระบบ", use_container_width=True, key="btn_logout"):
-            st.session_state.live_running = False
             for k in ["authenticated", "username", "user_data", "model",
-                      "main_system", "unique_runtime", "live_running",
+                      "main_system", "unique_runtime",
                       "home_result_images", "home_result_raw"]:
                 st.session_state.pop(k, None)
             st.rerun()
 
-    # ── header ──
     st.markdown(
-        '<h2 style="color:#E07B00!important;font-size:26px;font-weight:800;'
-        'letter-spacing:-0.5px;margin-bottom:24px;">Steel Eye</h2>',
+        '<h2 style="color:#E07B00!important;font-size:24px;font-weight:800;'
+        'letter-spacing:-0.5px;margin-bottom:20px;">Steel Eye</h2>',
         unsafe_allow_html=True,
     )
 
-    # ── route ──
     if page == "หน้าหลัก":
         page_home()
     elif page == "ประวัติ":
