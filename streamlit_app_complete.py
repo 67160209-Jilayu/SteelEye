@@ -1,118 +1,139 @@
-"""
-streamlit_app.py — Steel Eye
-ระบบ AI นับและแยกประเภทเหล็ก (เหล็กเส้น / เหล็กกล่อง)
-"""
-
 import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 from core import MainSystem, UniqueRuntimeSystem
-import os, io, zipfile, json
+import os, io, zipfile, json, re
 from datetime import datetime
 from setup import setup_directories, setup_user_history
 from state_manager import initialize_runtime
 from auth import AuthManager
 
-# ─────────────────────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Steel Eye",
-    page_icon="⚙️",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Steel Eye", page_icon="⚙️", layout="wide", initial_sidebar_state="expanded")
 
-st.markdown("""
+MAX_FILE_SIZE_MB = 10
+MAX_FILES = 10
+
+CSS = """
 <style>
-/* base */
-.stApp { background: #0F1117; }
-h1,h2,h3,h4 { color: #F0F0F0 !important; font-weight: 600; }
-p, span, label, div { color: #C8C8C8 !important; }
-
-/* buttons */
-.stButton > button {
-    background: #E07B00; color: #fff !important;
-    border: none; border-radius: 6px;
-    padding: 10px 22px; font-weight: 600; font-size: 14px;
-    transition: background 0.2s;
-}
-.stButton > button:hover { background: #C06A00; }
-.stDownloadButton > button {
-    background: #1E6641; color: #fff !important;
-    border: none; border-radius: 6px;
-    padding: 10px 22px; font-weight: 600; font-size: 14px;
-    transition: background 0.2s;
-}
-.stDownloadButton > button:hover { background: #174F33; }
-
-/* card */
-.se-card {
-    background: #1C1F27; border: 1px solid #2A2D36;
-    border-radius: 10px; padding: 18px 20px; margin-bottom: 10px;
-}
-.se-stat-num   { font-size: 32px; font-weight: 700; color: #F0F0F0 !important; margin: 0; line-height: 1; }
-.se-stat-label { font-size: 12px; color: #777 !important; margin: 4px 0 0 0; }
-
-/* chips */
-.chip-bar { background:#E07B00; color:#fff !important; padding:2px 10px; border-radius:4px; font-size:12px; font-weight:600; display:inline-block; }
-.chip-rod { background:#2563EB; color:#fff !important; padding:2px 10px; border-radius:4px; font-size:12px; font-weight:600; display:inline-block; }
-.chip-ok  { background:#1E6641; color:#fff !important; padding:2px 10px; border-radius:4px; font-size:12px; font-weight:600; display:inline-block; }
-
-/* history table */
-.hist-head {
-    display:grid; grid-template-columns:140px 1fr 120px 100px 80px;
-    align-items:center; gap:12px; padding:8px 16px;
-    background:#14161D; border-radius:8px 8px 0 0;
-    font-size:11px; font-weight:600; color:#555 !important;
-    text-transform:uppercase; letter-spacing:0.06em;
-}
-.hist-row {
-    display:grid; grid-template-columns:140px 1fr 120px 100px 80px;
-    align-items:center; gap:12px; padding:10px 16px;
-    border-bottom:1px solid #252830; font-size:13px;
-}
-.hist-row:hover { background:#1E2130; }
-
-/* camera guide */
-.cam-guide {
-    background:#1C1F27; border:1px solid #2A2D36;
-    border-left:3px solid #E07B00;
-    border-radius:8px; padding:12px 16px; margin-bottom:14px;
-    font-size:13px; color:#C8C8C8 !important;
-}
-.cam-guide b { color:#E07B00 !important; }
-
-/* page title */
-.se-title {
-    font-size:20px; font-weight:700; color:#F0F0F0 !important;
-    border-left:3px solid #E07B00; padding-left:12px; margin-bottom:20px;
-}
-
-/* login */
-.login-logo { font-size:34px; font-weight:800; color:#E07B00 !important; letter-spacing:-1px; }
-.login-sub  { font-size:13px; color:#555 !important; margin:2px 0 28px; }
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
+*,*::before,*::after{box-sizing:border-box;}
+.stApp{background:#0d0d0d;font-family:'DM Sans',-apple-system,sans-serif;}
+section[data-testid="stSidebar"]{background:#111111;border-right:0.5px solid rgba(255,255,255,0.07);}
+section[data-testid="stSidebar"]>div{padding:20px 14px;}
+/* --- Radio nav: dot style --- */
+.stRadio>div{gap:2px;}
+.stRadio div[role="radiogroup"] label{background:transparent;border-radius:8px;padding:7px 10px;font-size:13px;color:rgba(240,240,240,0.45)!important;transition:color .15s,background .15s;cursor:pointer;display:flex!important;align-items:center!important;gap:8px;}
+.stRadio div[role="radiogroup"] label:hover{color:rgba(240,240,240,0.7)!important;background:rgba(255,255,255,0.03);}
+.stRadio div[role="radiogroup"] label>div:first-child{display:none!important;}
+.stRadio div[role="radiogroup"] label::before{content:'';width:5px;height:5px;border-radius:50%;background:rgba(240,240,240,0.2);flex-shrink:0;transition:background .15s;}
+div[data-baseweb="radio"]:has(input:checked) label{background:rgba(255,255,255,0.06)!important;color:#f0f0f0!important;}
+div[data-baseweb="radio"]:has(input:checked) label::before{background:#E07B00!important;}
+/* --- Buttons --- */
+.stButton>button{background:rgba(255,255,255,0.07)!important;color:#f0f0f0!important;border:0.5px solid rgba(255,255,255,0.12)!important;border-radius:10px;padding:13px 20px;font-size:14px;font-weight:600;font-family:'DM Sans',sans-serif;letter-spacing:-0.1px;transition:background .15s,transform .1s;width:100%;}
+.stButton>button:hover{background:rgba(255,255,255,0.11)!important;border-color:rgba(255,255,255,0.18)!important;}
+.stButton>button:active{transform:scale(.98);}
+.stButton>button:disabled{opacity:0.35!important;cursor:not-allowed;}
+.stDownloadButton>button{background:rgba(255,255,255,0.04)!important;color:rgba(240,240,240,0.6)!important;border:0.5px solid rgba(255,255,255,0.1)!important;border-radius:9px;padding:9px 20px;font-size:12px;font-weight:500;font-family:'DM Sans',sans-serif;transition:background .15s;}
+.stDownloadButton>button:hover{background:rgba(255,255,255,0.08)!important;}
+/* --- Inputs --- */
+.stTextInput input{background:rgba(255,255,255,0.04)!important;border:0.5px solid rgba(255,255,255,0.1)!important;border-radius:8px;color:#f0f0f0!important;font-family:'DM Sans',sans-serif;font-size:13px;padding:9px 11px;transition:border-color .15s;}
+.stTextInput input:focus{border-color:rgba(224,123,0,0.5)!important;box-shadow:none!important;}
+.stTextInput label{font-size:11px!important;color:rgba(240,240,240,0.3)!important;letter-spacing:0.04em;}
+/* --- File uploader --- */
+.stFileUploader{background:rgba(255,255,255,0.015);border:1px dashed rgba(255,255,255,0.13);border-radius:12px;padding:8px;transition:border-color .2s,background .2s;}
+.stFileUploader:hover{border-color:rgba(224,123,0,0.35);background:rgba(224,123,0,0.02);}
+.stFileUploader label{color:rgba(240,240,240,0.5)!important;font-size:13px!important;}
+.stFileUploader [data-testid="stFileUploaderDropzone"] p{font-size:13px!important;font-weight:500!important;color:rgba(240,240,240,0.55)!important;}
+.stFileUploader [data-testid="stFileUploaderDropzone"] small{font-size:12px!important;color:rgba(240,240,240,0.25)!important;}
+/* --- Tabs --- */
+.stTabs [data-baseweb="tab-list"]{background:transparent;border-bottom:0.5px solid rgba(255,255,255,0.07);gap:0;}
+.stTabs [data-baseweb="tab"]{background:transparent;color:rgba(240,240,240,0.35)!important;font-size:13px;font-weight:500;padding:9px 16px;border-bottom:1.5px solid transparent;transition:color .15s;}
+.stTabs [aria-selected="true"]{color:#f0f0f0!important;border-bottom-color:#E07B00!important;background:transparent!important;}
+.stTabs [data-baseweb="tab-panel"]{padding:20px 0 0;}
+/* --- Mode toggle pill --- */
+div[data-testid="stHorizontalRadio"]>div{background:rgba(255,255,255,0.04);border-radius:9px;padding:3px;width:fit-content;gap:0!important;display:flex;}
+div[data-testid="stHorizontalRadio"] div[role="radiogroup"] label{border-radius:7px!important;padding:6px 18px!important;background:transparent!important;gap:0!important;}
+div[data-testid="stHorizontalRadio"] div[role="radiogroup"] label::before{display:none!important;}
+div[data-testid="stHorizontalRadio"] div[data-baseweb="radio"]:has(input:checked) label{background:rgba(255,255,255,0.10)!important;}
+/* --- Selectbox --- */
+.stSelectbox>div>div{background:rgba(255,255,255,0.04)!important;border:0.5px solid rgba(255,255,255,0.1)!important;border-radius:8px;color:#f0f0f0!important;font-size:13px;}
+/* --- Misc --- */
+.stAlert{border-radius:8px;font-size:13px;border:none;}
+.stSpinner>div{border-top-color:#E07B00!important;}
+.stDivider{border-color:rgba(255,255,255,0.06)!important;}
+.stImage img{border-radius:8px;}
+.stCaption{color:rgba(240,240,240,0.3)!important;font-size:12px!important;}
+h1,h2,h3,h4{color:#f0f0f0!important;}
+p,span,label,div{color:#c8c8c8;}
+.streamlit-expanderHeader{background:rgba(255,255,255,0.03)!important;border:0.5px solid rgba(255,255,255,0.07)!important;border-radius:8px!important;font-size:13px!important;color:rgba(240,240,240,0.5)!important;}
+.streamlit-expanderContent{border:0.5px solid rgba(255,255,255,0.07)!important;border-top:none!important;background:rgba(255,255,255,0.01)!important;}
+.stCameraInput>div{border:0.5px solid rgba(255,255,255,0.1)!important;border-radius:12px!important;background:#1a1a1a!important;}
+/* ===== Custom components ===== */
+.brand{display:flex;align-items:center;gap:8px;padding-bottom:20px;margin-bottom:20px;}
+.brand-dot{width:7px;height:7px;border-radius:50%;background:#E07B00;flex-shrink:0;}
+.brand-name{font-size:14px;font-weight:600;color:#f0f0f0!important;letter-spacing:-0.2px;}
+.user-info{padding-top:16px;border-top:0.5px solid rgba(255,255,255,0.07);}
+.user-name{font-size:13px;font-weight:500;color:#f0f0f0!important;}
+.user-handle{font-size:11px;color:rgba(240,240,240,0.25)!important;margin-top:2px;}
+.page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;}
+.page-title{font-size:17px;font-weight:600;color:#f0f0f0!important;letter-spacing:-0.3px;margin:0;}
+.today-badge{font-size:12px;color:rgba(240,240,240,0.45)!important;background:rgba(255,255,255,0.05);border:0.5px solid rgba(255,255,255,0.1);border-radius:20px;padding:4px 12px;white-space:nowrap;}
+.stat-cards-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;}
+.stat-card-item{background:#1a1a1a;border:0.5px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
+.stat-card-line{height:2.5px;border-radius:2px;width:36px;}
+.stat-card-label{font-size:12px;color:rgba(240,240,240,0.45)!important;}
+.stat-card-num{font-size:22px;font-weight:700;letter-spacing:-0.5px;line-height:1;}
+.result-card{background:#1a1a1a;border:0.5px solid rgba(255,255,255,0.07);border-radius:10px;padding:13px 15px;margin-bottom:8px;}
+.result-filename{font-size:11px;color:rgba(240,240,240,0.3)!important;margin-bottom:8px;}
+.result-row{display:flex;justify-content:space-between;align-items:flex-end;}
+.result-tags{display:flex;gap:5px;flex-wrap:wrap;}
+.tag{font-size:11px;font-weight:500;padding:3px 8px;border-radius:4px;display:inline-block;}
+.tag-bar{background:rgba(224,123,0,0.12);color:#E07B00!important;}
+.tag-rod{background:rgba(78,156,255,0.1);color:#4e9cff!important;}
+.tag-none{background:rgba(255,255,255,0.05);color:rgba(240,240,240,0.3)!important;}
+.result-total{text-align:right;}
+.result-num{font-size:28px;font-weight:700;color:#f0f0f0!important;line-height:1;letter-spacing:-1px;}
+.result-conf{font-size:11px;color:rgba(240,240,240,0.25)!important;margin-top:2px;}
+.summary-row{display:flex;gap:10px;margin-bottom:20px;}
+.summary-card{flex:1;background:#1a1a1a;border:0.5px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px 16px;}
+.summary-n{font-size:26px;font-weight:700;line-height:1;letter-spacing:-0.8px;}
+.summary-l{font-size:11px;color:rgba(240,240,240,0.3)!important;margin-top:4px;}
+.n-white{color:#f0f0f0!important;}.n-orange{color:#E07B00!important;}.n-blue{color:#4e9cff!important;}
+.hist-table{border:0.5px solid rgba(255,255,255,0.07);border-radius:10px;overflow:hidden;}
+.hist-head{display:grid;grid-template-columns:130px 1fr 100px 100px 64px;gap:12px;padding:9px 16px;background:rgba(255,255,255,0.03);font-size:10px;font-weight:500;color:rgba(240,240,240,0.25)!important;letter-spacing:0.06em;text-transform:uppercase;}
+.hist-row{display:grid;grid-template-columns:130px 1fr 100px 100px 64px;gap:12px;padding:10px 16px;border-top:0.5px solid rgba(255,255,255,0.04);font-size:12px;transition:background .1s;}
+.hist-row:hover{background:rgba(255,255,255,0.02);}
+.hist-time{color:rgba(240,240,240,0.35)!important;font-variant-numeric:tabular-nums;}
+.hist-file{color:#f0f0f0!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hist-conf{color:rgba(240,240,240,0.3)!important;font-variant-numeric:tabular-nums;}
+.cam-tip{background:rgba(224,123,0,0.06);border:0.5px solid rgba(224,123,0,0.15);border-radius:8px;padding:10px 14px;font-size:13px;color:rgba(240,240,240,0.6)!important;margin-bottom:16px;}
+.section-title{font-size:11px;color:rgba(240,240,240,0.25)!important;letter-spacing:0.05em;text-transform:uppercase;margin-bottom:12px;}
+.acct-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:0.5px solid rgba(255,255,255,0.05);}
+.acct-key{font-size:12px;color:rgba(240,240,240,0.35)!important;}
+.acct-val{font-size:13px;font-weight:500;color:#f0f0f0!important;}
+.pwd-bar-wrap{margin:4px 0 10px;}
+.pwd-bar-track{height:3px;background:rgba(255,255,255,0.07);border-radius:2px;}
+.pwd-bar-fill{height:3px;border-radius:2px;transition:width .25s,background .25s;}
+.pwd-hint{font-size:11px;margin-top:4px;}
+.match-ok{font-size:11px;color:#4ade80!important;}
+.match-no{font-size:11px;color:#f87171!important;}
+.login-title{font-size:22px;font-weight:700;color:#f0f0f0!important;letter-spacing:-0.7px;margin-bottom:3px;}
+.login-sub{font-size:13px;color:rgba(240,240,240,0.28)!important;margin-bottom:28px;}
+.empty-state{text-align:center;padding:48px 24px;color:rgba(240,240,240,0.2)!important;font-size:13px;}
 </style>
-""", unsafe_allow_html=True)
+"""
 
-# ─────────────────────────────────────────────────────────────
-# GLOBAL INIT
-# ─────────────────────────────────────────────────────────────
+st.markdown(CSS, unsafe_allow_html=True)
+
 auth = AuthManager("steel_eye_users.json")
 setup_directories()
 setup_user_history()
 
-for _k, _v in {
-    "authenticated": False, "username": None,
-    "user_data": None, "model": None,
-}.items():
-    if _k not in st.session_state:
-        st.session_state[_k] = _v
+for k, v in {"authenticated": False, "username": None, "user_data": None, "model": None}.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 
-# ─────────────────────────────────────────────────────────────
-# MODEL
-# ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_model():
     for path in ["steel_model_yolo11/weights/best.pt", "weights/best.pt", "best.pt"]:
@@ -132,565 +153,425 @@ def ensure_runtime() -> bool:
     if not st.session_state.get("model"):
         st.session_state.model = load_model()
     if st.session_state.model is None:
-        st.error("โหลด model ไม่ได้ — กรุณาตรวจสอบไฟล์ weight")
+        st.error("โหลด model ไม่ได้")
         return False
     if "main_system" not in st.session_state or "unique_runtime" not in st.session_state:
         initialize_runtime(st.session_state.model)
     return True
 
 
-# ─────────────────────────────────────────────────────────────
-# ANALYSIS
-# ─────────────────────────────────────────────────────────────
-def _collect_output_images(image_names: list, output_basket: str) -> list:
-    images = []
-    for name in image_names:
-        path = os.path.join(output_basket, name)
-        if os.path.exists(path):
-            try:
-                images.append(Image.open(path).copy())
-            except Exception:
-                pass
-    return images
+def validate_files(files) -> tuple[bool, str]:
+    if not files:
+        return False, "กรุณาเลือกไฟล์"
+    if len(files) > MAX_FILES:
+        return False, f"อัปโหลดได้สูงสุด {MAX_FILES} ไฟล์ต่อครั้ง"
+    for f in files:
+        if os.path.splitext(f.name)[1].lower() not in {".jpg", ".jpeg", ".png"}:
+            return False, f"'{f.name}' ไม่รองรับ"
+        if f.size / 1024 / 1024 > MAX_FILE_SIZE_MB:
+            return False, f"'{f.name}' ขนาดเกิน {MAX_FILE_SIZE_MB} MB"
+        hdr = f.read(12); f.seek(0)
+        if not (hdr[:3] == b'\xff\xd8\xff' or hdr[:8] == b'\x89PNG\r\n\x1a\n'):
+            return False, f"'{f.name}' ไม่ใช่รูปภาพที่ถูกต้อง"
+    return True, ""
 
 
-def run_analysis_files(uploaded_files: list) -> tuple:
-    if not ensure_runtime():
-        raise RuntimeError("Runtime not ready")
-    main_sys: MainSystem          = st.session_state.main_system
-    runtime:  UniqueRuntimeSystem = st.session_state.unique_runtime
-
-    file_names = []
-    for uf in uploaded_files:
-        dest = os.path.join(main_sys.input_basket, uf.name)
-        with open(dest, "wb") as f:
-            f.write(uf.getbuffer())
-        file_names.append(uf.name)
-
-    runtime.input_basket_tracker.clear()
-    runtime.receive_image(file_names)
-    runtime.predict()
-
-    raw_names   = runtime.recall_newest_history_image()
-    image_names = [n for n in raw_names if n != "avg_confident"]
-    return _collect_output_images(image_names, main_sys.output_basket), runtime.get_newest_history()
+def _collect_outputs(names, basket):
+    imgs = []
+    for n in names:
+        p = os.path.join(basket, n)
+        if os.path.exists(p):
+            try: imgs.append(Image.open(p).copy())
+            except: pass
+    return imgs
 
 
-def run_analysis_pil(pil_image: Image.Image, filename: str = "webcam_frame.jpg") -> tuple:
-    if not ensure_runtime():
-        raise RuntimeError("Runtime not ready")
-    main_sys: MainSystem          = st.session_state.main_system
-    runtime:  UniqueRuntimeSystem = st.session_state.unique_runtime
-
-    if pil_image.mode in ("RGBA", "P"):
-        pil_image = pil_image.convert("RGB")
-    dest = os.path.join(main_sys.input_basket, filename)
-    pil_image.save(dest, format="JPEG", quality=95)
-
-    runtime.input_basket_tracker.clear()
-    runtime.receive_image([filename])
-    runtime.predict()
-
-    raw_names   = runtime.recall_newest_history_image()
-    image_names = [n for n in raw_names if n != "avg_confident"]
-    return _collect_output_images(image_names, main_sys.output_basket), runtime.get_newest_history()
+def run_files(files):
+    if not ensure_runtime(): raise RuntimeError("Runtime not ready")
+    ms = st.session_state.main_system
+    rt = st.session_state.unique_runtime
+    names = []
+    for f in files:
+        dest = os.path.join(ms.input_basket, f.name)
+        with open(dest, "wb") as out: out.write(f.getbuffer())
+        names.append(f.name)
+    rt.input_basket_tracker.clear()
+    rt.receive_image(names); rt.predict()
+    raw = [n for n in rt.recall_newest_history_image() if n != "avg_confident"]
+    return _collect_outputs(raw, ms.output_basket), rt.get_newest_history()
 
 
-# ─────────────────────────────────────────────────────────────
-# ZIP / HISTORY
-# ─────────────────────────────────────────────────────────────
-def build_zip(images: list, result_dict: dict, label: str = "result") -> bytes:
+def run_pil(img, fname="snap.jpg"):
+    if not ensure_runtime(): raise RuntimeError("Runtime not ready")
+    ms = st.session_state.main_system
+    rt = st.session_state.unique_runtime
+    if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+    img.save(os.path.join(ms.input_basket, fname), format="JPEG", quality=95)
+    rt.input_basket_tracker.clear()
+    rt.receive_image([fname]); rt.predict()
+    raw = [n for n in rt.recall_newest_history_image() if n != "avg_confident"]
+    return _collect_outputs(raw, ms.output_basket), rt.get_newest_history()
+
+
+def build_zip(imgs, data, label="result"):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for idx, img in enumerate(images):
+        for i, img in enumerate(imgs):
             try:
-                if isinstance(img, str):
-                    if os.path.exists(img):
-                        ext = os.path.splitext(img)[1] or ".jpg"
-                        with open(img, "rb") as f:
-                            zf.writestr(f"{label}_{idx+1}{ext}", f.read())
-                else:
-                    ib = io.BytesIO()
-                    img.save(ib, format="JPEG", quality=95)
-                    zf.writestr(f"{label}_{idx+1}.jpg", ib.getvalue())
-            except Exception:
-                pass
-        zf.writestr("results.json", json.dumps(result_dict, indent=2, ensure_ascii=False))
-    buf.seek(0)
-    return buf.getvalue()
+                ib = io.BytesIO(); img.save(ib, format="JPEG", quality=95)
+                zf.writestr(f"{label}_{i+1}.jpg", ib.getvalue())
+            except: pass
+        zf.writestr("results.json", json.dumps(data, indent=2, ensure_ascii=False))
+    buf.seek(0); return buf.getvalue()
 
 
-def load_output_images_for_history(result_dict: dict) -> list:
-    output_dir = "image_basket/output"
-    images = []
-    for filename in result_dict.keys():
-        if filename == "avg_confident":
-            continue
-        path = os.path.join(output_dir, filename)
-        if os.path.exists(path):
-            try:
-                images.append(Image.open(path).copy())
-            except Exception:
-                pass
-    return images
+def load_history_imgs(results):
+    imgs = []
+    for fname in results:
+        if fname == "avg_confident": continue
+        p = os.path.join("image_basket/output", fname)
+        if os.path.exists(p):
+            try: imgs.append(Image.open(p).copy())
+            except: pass
+    return imgs
 
 
-def save_analysis(username: str, filename: str, raw: dict):
-    auth.save_user_analysis(username, {
-        "filename":  filename,
-        "results":   raw,
-        "timestamp": datetime.now().isoformat(),
-    })
+def save_analysis(username, filename, raw):
+    auth.save_user_analysis(username, {"filename": filename, "results": raw, "timestamp": datetime.now().isoformat()})
 
 
-# ─────────────────────────────────────────────────────────────
-# UI COMPONENTS
-# ─────────────────────────────────────────────────────────────
-def _count_chips(counts: dict) -> str:
+def _tags(counts):
+    if not counts:
+        return '<span class="tag tag-none">ไม่พบเหล็ก</span>'
     parts = []
     for cls, cnt in counts.items():
-        css = "chip-bar" if "กล่อง" in cls else "chip-rod"
-        parts.append(f'<span class="{css}">{cls}&nbsp;{cnt}</span>')
-    return "&nbsp; ".join(parts) if parts else '<span class="chip-ok">ไม่พบเหล็ก</span>'
+        t = "tag-bar" if "กล่อง" in cls else "tag-rod"
+        parts.append(f'<span class="tag {t}">{cls} {cnt}</span>')
+    return " ".join(parts)
 
 
-def render_result_stats(raw: dict):
-    """card สรุปผลการนับแต่ละภาพ"""
+def render_stats(raw):
     for img_name, det in raw.items():
-        conf   = det.get("avg_confident", 0)
+        conf = det.get("avg_confident", 0)
         counts = {k: v for k, v in det.items() if k != "avg_confident"}
-        total  = sum(counts.values())
+        total = sum(counts.values())
         st.markdown(f"""
-        <div class="se-card">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-                <div>
-                    <p style="font-size:11px;color:#555!important;margin:0 0 8px 0;">{img_name}</p>
-                    <div>{_count_chips(counts)}</div>
-                </div>
-                <div style="text-align:right;flex-shrink:0;">
-                    <p class="se-stat-num">{total}</p>
-                    <p class="se-stat-label">ชิ้นรวม</p>
-                    <p style="font-size:11px;color:#555!important;margin:6px 0 0 0;">{conf:.0%}</p>
+        <div class="result-card">
+            <div class="result-filename">{img_name}</div>
+            <div class="result-row">
+                <div class="result-tags">{_tags(counts)}</div>
+                <div class="result-total">
+                    <div class="result-num">{total}</div>
+                    <div class="result-conf">{conf:.0%}</div>
                 </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
 
-def render_result_block(result_imgs: list, result_raw: dict, key_prefix: str):
-    """รูป annotated + stats + download"""
-    st.divider()
-    st.markdown('<p class="se-title">ผลการตรวจนับ</p>', unsafe_allow_html=True)
+def render_stat_cards(raw=None):
+    if raw:
+        total = bar = rod = 0
+        confs = []
+        for det in raw.values():
+            c = det.get("avg_confident", 0)
+            if c: confs.append(c)
+            for k, v in det.items():
+                if k == "avg_confident": continue
+                total += v
+                if "กล่อง" in k: bar += v
+                elif "เส้น" in k: rod += v
+        avg_conf = sum(confs) / len(confs) if confs else 0
+        cards = [
+            ("rgba(240,240,240,0.5)", f'<div class="stat-card-num" style="color:#f0f0f0">{total}</div>', "จำนวนรวม"),
+            ("#E07B00", f'<div class="stat-card-num" style="color:#E07B00">{bar}</div>', "เหล็กกล่อง"),
+            ("#4e9cff", f'<div class="stat-card-num" style="color:#4e9cff">{rod}</div>', "เหล็กเส้น"),
+            ("rgba(240,240,240,0.2)", f'<div class="stat-card-num" style="color:rgba(240,240,240,0.5)">{avg_conf:.0%}</div>', "ความแม่นยำ"),
+        ]
+    else:
+        cards = [
+            ("rgba(240,240,240,0.5)", "", "จำนวนรวม"),
+            ("#E07B00", "", "เหล็กกล่อง"),
+            ("#4e9cff", "", "เหล็กเส้น"),
+            ("rgba(240,240,240,0.2)", "", "ความแม่นยำ"),
+        ]
+    items = "".join(
+        f'<div class="stat-card-item"><div class="stat-card-line" style="background:{col}"></div>'
+        f'<div>{num}<div class="stat-card-label">{lbl}</div></div></div>'
+        for col, num, lbl in cards
+    )
+    st.markdown(f'<div class="stat-cards-row">{items}</div>', unsafe_allow_html=True)
 
-    img_col, stat_col = st.columns([1.5, 0.5])
+
+def render_result(imgs, raw, prefix):
+    st.divider()
+    img_col, stat_col = st.columns([1.6, 0.85])
     with img_col:
-        if result_imgs:
-            cols = st.columns(min(len(result_imgs), 3))
-            for idx, img in enumerate(result_imgs):
-                with cols[idx % 3]:
-                    st.image(img, use_container_width=True)
+        if imgs:
+            cols = st.columns(min(len(imgs), 3))
+            for i, img in enumerate(imgs):
+                with cols[i % 3]: st.image(img, use_container_width=True)
         else:
             st.info("ไม่มีรูป output")
         st.download_button(
-            label="ดาวน์โหลดผล (ZIP)",
-            data=build_zip(result_imgs, result_raw, key_prefix),
+            "ดาวน์โหลดผล (ZIP)", build_zip(imgs, raw, prefix),
             file_name=f"steel_eye_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-            mime="application/zip",
-            key=f"dl_{key_prefix}_{id(result_raw)}",
-            use_container_width=True,
+            mime="application/zip", key=f"dl_{prefix}_{id(raw)}", use_container_width=True,
         )
     with stat_col:
-        render_result_stats(result_raw)
+        render_stats(raw)
 
 
-# ─────────────────────────────────────────────────────────────
-# LOGIN
-# ─────────────────────────────────────────────────────────────
+def pwd_strength_html(pwd):
+    l = len(pwd)
+    score = min(4, (l >= 6) + (l >= 10) + any(c.isdigit() for c in pwd) + any(not c.isalnum() for c in pwd))
+    colors = ["#f87171", "#fb923c", "#facc15", "#4ade80", "#60a5fa"]
+    labels = ["อ่อนมาก", "อ่อน", "พอใช้", "ดี", "แข็งแกร่ง"]
+    w = [20, 40, 60, 80, 100]
+    return f"""<div class="pwd-bar-wrap">
+        <div class="pwd-bar-track"><div class="pwd-bar-fill" style="width:{w[score]}%;background:{colors[score]};"></div></div>
+        <div class="pwd-hint" style="color:{colors[score]}!important;">{labels[score]}</div>
+    </div>"""
+
+
 def show_login_page():
     _, col, _ = st.columns([1, 1, 1])
     with col:
-        st.markdown('<p class="login-logo">Steel Eye</p>', unsafe_allow_html=True)
-        st.markdown('<p class="login-sub">ระบบ AI นับและแยกประเภทเหล็ก</p>', unsafe_allow_html=True)
-
+        st.markdown('<div class="login-title">Steel Eye</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-sub">ระบบ AI นับและแยกประเภทเหล็ก</div>', unsafe_allow_html=True)
         tab_in, tab_reg = st.tabs(["เข้าสู่ระบบ", "สมัครสมาชิก"])
-
         with tab_in:
-            uname = st.text_input("ชื่อผู้ใช้", placeholder="Username", key="login_uname")
-            pwd   = st.text_input("รหัสผ่าน",   type="password", placeholder="Password", key="login_pwd")
-            if st.button("เข้าสู่ระบบ", use_container_width=True, key="btn_login"):
+            uname = st.text_input("ชื่อผู้ใช้", placeholder="username", key="login_uname")
+            pwd = st.text_input("รหัสผ่าน", type="password", placeholder="••••••••", key="login_pwd")
+            if st.button("เข้าสู่ระบบ", key="btn_login"):
                 if uname and pwd:
-                    res = auth.login(uname, pwd)
+                    with st.spinner(""):
+                        res = auth.login(uname, pwd)
                     if res["success"]:
-                        st.session_state.authenticated = True
-                        st.session_state.username      = uname
-                        st.session_state.user_data     = res["user_data"]
+                        st.session_state.update(authenticated=True, username=uname, user_data=res["user_data"])
                         st.rerun()
                     else:
                         st.error(res["message"])
                 else:
-                    st.warning("กรุณากรอกชื่อผู้ใช้และรหัสผ่าน")
-
+                    st.warning("กรุณากรอกข้อมูลให้ครบ")
         with tab_reg:
-            ru = st.text_input("ชื่อผู้ใช้",    placeholder="เลือก username",      key="reg_u")
-            rp = st.text_input("รหัสผ่าน",      type="password", placeholder="อย่างน้อย 6 ตัว", key="reg_p")
-            rf = st.text_input("ชื่อ-นามสกุล", placeholder="ชื่อของคุณ",           key="reg_f")
-            if st.button("สมัครสมาชิก", use_container_width=True, key="btn_reg"):
+            ru = st.text_input("ชื่อผู้ใช้", placeholder="ตัวอักษร ตัวเลข _ -", key="reg_u")
+            rp = st.text_input("รหัสผ่าน", type="password", placeholder="อย่างน้อย 6 ตัวอักษร", key="reg_p")
+            if rp:
+                st.markdown(pwd_strength_html(rp), unsafe_allow_html=True)
+            rf = st.text_input("ชื่อ-นามสกุล", placeholder="ชื่อของคุณ", key="reg_f")
+            if st.button("สมัครสมาชิก", key="btn_reg"):
                 if ru and rp and rf:
-                    res = auth.register(ru, rp, rf)
+                    with st.spinner(""):
+                        res = auth.register(ru, rp, rf)
                     if res["success"]:
-                        st.success("สมัครสำเร็จ — กรุณาเข้าสู่ระบบ")
+                        st.success("สมัครสำเร็จ — ไปที่แท็บ เข้าสู่ระบบ")
                     else:
                         st.error(res["message"])
                 else:
                     st.warning("กรุณากรอกข้อมูลให้ครบ")
 
 
-# ─────────────────────────────────────────────────────────────
-# PAGES
-# ─────────────────────────────────────────────────────────────
 def page_home():
-    st.markdown('<p class="se-title">ตรวจนับเหล็ก</p>', unsafe_allow_html=True)
+    all_a = auth.get_user_analyses(st.session_state.username)
+    today_count = sum(1 for ts, _ in all_a if datetime.fromisoformat(ts).date() == datetime.now().date())
+    st.markdown(f"""
+    <div class="page-header">
+        <div class="page-title">ตรวจนับ</div>
+        <div class="today-badge">{today_count} ครั้งวันนี้</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # เลือกวิธีนำเข้าภาพ — 2 โหมดเท่านั้น (ลบ live ออก)
-    input_mode = st.radio(
-        "วิธีนำเข้าภาพ",
-        ["อัปโหลดไฟล์", "ถ่ายภาพจากกล้อง"],
-        horizontal=True,
-        key="home_input_mode",
-        captions=["เลือกจากเครื่อง", "ใช้กล้องถ่ายทันที"],
-    )
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    mode = st.radio("", ["อัปโหลดไฟล์", "ถ่ายภาพ"], horizontal=True, key="home_mode", label_visibility="collapsed")
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-    # ── โหมดอัปโหลด ──
-    if input_mode == "อัปโหลดไฟล์":
-        uploaded_files = st.file_uploader(
-            "เลือกรูป PNG / JPG (เลือกได้หลายรูปพร้อมกัน)",
-            type=["jpg", "jpeg", "png"],
-            accept_multiple_files=True,
-            key="home_uploader",
+    if mode == "อัปโหลดไฟล์":
+        files = st.file_uploader(
+            "", type=["jpg", "jpeg", "png"], accept_multiple_files=True,
+            key="home_uploader", label_visibility="collapsed",
         )
-
-        if not uploaded_files:
-            st.session_state.pop("home_result_images", None)
-            st.session_state.pop("home_result_raw",    None)
+        if not files:
+            st.session_state.pop("home_imgs", None); st.session_state.pop("home_raw", None)
+            render_stat_cards()
+            st.button("ตรวจนับ", key="btn_analyze_off", disabled=True)
             return
-
-        # preview รูปที่เลือก
-        st.caption(f"เลือก {len(uploaded_files)} ไฟล์")
-        prev_cols = st.columns(min(len(uploaded_files), 4))
-        for idx, uf in enumerate(uploaded_files):
-            with prev_cols[idx % 4]:
-                st.image(uf, caption=uf.name, use_container_width=True)
-
-        # ปุ่มกลางหน้า
-        _, btn_col, _ = st.columns([1, 1, 1])
-        with btn_col:
-            if st.button("ตรวจนับ", use_container_width=True, key="home_btn_analyze"):
+        ok, err = validate_files(files)
+        if not ok:
+            st.error(err); return
+        st.caption(f"{len(files)} ไฟล์")
+        preview_cols = st.columns(min(len(files), 4))
+        for i, f in enumerate(files):
+            with preview_cols[i % 4]: st.image(f, caption=f.name, use_container_width=True)
+        render_stat_cards(st.session_state.get("home_raw"))
+        if st.button("ตรวจนับ", key="btn_analyze"):
+            with st.spinner("กำลังประมวลผล..."):
+                try:
+                    imgs, raw = run_files(files)
+                    st.session_state.home_imgs = imgs
+                    st.session_state.home_raw = raw
+                    save_analysis(st.session_state.username, ", ".join(f.name for f in files), raw)
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+        if st.session_state.get("home_imgs") is not None:
+            render_result(st.session_state["home_imgs"], st.session_state["home_raw"], "upload")
+    else:
+        st.markdown('<div class="cam-tip">กด <strong>Take photo</strong> แล้วกดปุ่ม <strong>ตรวจนับ</strong></div>', unsafe_allow_html=True)
+        cam = st.camera_input("", key="home_cam", label_visibility="collapsed")
+        if cam is None:
+            st.caption("หากกล้องไม่ขึ้น ให้อนุญาต Camera permission ในเบราว์เซอร์")
+            st.session_state.pop("home_imgs", None); st.session_state.pop("home_raw", None)
+            render_stat_cards()
+            st.button("ตรวจนับ", key="btn_snap_off", disabled=True)
+        else:
+            render_stat_cards(st.session_state.get("home_raw"))
+            if st.button("ตรวจนับ", key="btn_snap"):
                 with st.spinner("กำลังประมวลผล..."):
                     try:
-                        imgs, raw = run_analysis_files(uploaded_files)
-                        st.session_state.home_result_images = imgs
-                        st.session_state.home_result_raw    = raw
-                        save_analysis(
-                            st.session_state.username,
-                            ", ".join(f.name for f in uploaded_files),
-                            raw,
-                        )
+                        fname = f"snap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                        imgs, raw = run_pil(Image.open(cam), fname)
+                        st.session_state.home_imgs = imgs
+                        st.session_state.home_raw = raw
+                        save_analysis(st.session_state.username, fname, raw)
+                        st.rerun()
                     except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาด: {e}")
-
-        if st.session_state.get("home_result_images") is not None and \
-                st.session_state.get("home_result_raw") is not None:
-            render_result_block(
-                st.session_state["home_result_images"],
-                st.session_state["home_result_raw"],
-                "home_upload",
-            )
-
-    # ── โหมดกล้อง ──
-    else:
-        # คำแนะนำการใช้งาน
-        st.markdown("""
-        <div class="cam-guide">
-            กด <b>Take photo</b> ในกล้องด้านล่าง แล้วกดปุ่ม <b>ตรวจนับ</b>
-        </div>
-        """, unsafe_allow_html=True)
-
-        cam_img = st.camera_input(
-            "กดปุ่ม Take photo เพื่อถ่ายภาพ",
-            key="home_snap_input",
-        )
-
-        if cam_img is None:
-            st.caption("หากกล้องไม่ขึ้น ให้อนุญาต Camera permission ในเบราว์เซอร์")
-            st.session_state.pop("home_result_images", None)
-            st.session_state.pop("home_result_raw",    None)
-        else:
-            _, btn_col, _ = st.columns([1, 1, 1])
-            with btn_col:
-                if st.button("ตรวจนับ", use_container_width=True, key="home_snap_btn"):
-                    with st.spinner("กำลังประมวลผล..."):
-                        try:
-                            fname = f"snap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                            imgs, raw = run_analysis_pil(Image.open(cam_img), fname)
-                            st.session_state.home_result_images = imgs
-                            st.session_state.home_result_raw    = raw
-                            save_analysis(st.session_state.username, fname, raw)
-                        except Exception as e:
-                            st.error(f"เกิดข้อผิดพลาด: {e}")
-
-            if st.session_state.get("home_result_images") is not None and \
-                    st.session_state.get("home_result_raw") is not None:
-                render_result_block(
-                    st.session_state["home_result_images"],
-                    st.session_state["home_result_raw"],
-                    "home_snap",
-                )
+                        st.error(str(e))
+            if st.session_state.get("home_imgs") is not None:
+                render_result(st.session_state["home_imgs"], st.session_state["home_raw"], "snap")
 
 
 def page_history():
-    st.markdown('<p class="se-title">ประวัติการตรวจนับ</p>', unsafe_allow_html=True)
-
-    # ── filter ──
+    st.markdown('<div class="page-header"><div class="page-title">ประวัติ</div></div>', unsafe_allow_html=True)
     f1, f2, f3 = st.columns([2, 1.5, 1.5])
     with f1:
-        filter_type = st.selectbox(
-            "ช่วงเวลา",
-            ["ทั้งหมด", "7 วันล่าสุด", "30 วันล่าสุด", "กำหนดเอง"],
-            label_visibility="collapsed",
-        )
+        ftype = st.selectbox("", ["ทั้งหมด", "7 วันล่าสุด", "30 วันล่าสุด", "กำหนดเอง"], label_visibility="collapsed")
     with f2:
-        start_date = st.date_input("วันเริ่มต้น") if filter_type == "กำหนดเอง" else None
+        sd = st.date_input("เริ่ม") if ftype == "กำหนดเอง" else None
     with f3:
-        end_date = st.date_input("วันสิ้นสุด")   if filter_type == "กำหนดเอง" else None
-
-    if filter_type == "ทั้งหมด":
-        analyses = auth.get_user_analyses(st.session_state.username)
-    elif filter_type == "7 วันล่าสุด":
-        analyses = auth.get_user_analyses(st.session_state.username, days=7)
-    elif filter_type == "30 วันล่าสุด":
-        analyses = auth.get_user_analyses(st.session_state.username, days=30)
-    elif filter_type == "กำหนดเอง" and start_date and end_date:
-        analyses = auth.get_user_analyses_by_date_range(
-            st.session_state.username,
-            datetime.combine(start_date, datetime.min.time()),
-            datetime.combine(end_date,   datetime.max.time()),
-        )
+        ed = st.date_input("สิ้นสุด") if ftype == "กำหนดเอง" else None
+    if ftype == "กำหนดเอง" and sd and ed and sd > ed:
+        st.error("วันเริ่มต้นต้องไม่เกินวันสิ้นสุด"); return
+    u = st.session_state.username
+    if ftype == "ทั้งหมด":         analyses = auth.get_user_analyses(u)
+    elif ftype == "7 วันล่าสุด":   analyses = auth.get_user_analyses(u, days=7)
+    elif ftype == "30 วันล่าสุด":  analyses = auth.get_user_analyses(u, days=30)
+    elif ftype == "กำหนดเอง" and sd and ed:
+        analyses = auth.get_user_analyses_by_date_range(u, datetime.combine(sd, datetime.min.time()), datetime.combine(ed, datetime.max.time()))
     else:
         analyses = []
-
     if not analyses:
-        st.markdown(
-            '<div class="se-card" style="text-align:center;padding:40px;">'
-            '<p style="color:#555!important;">ยังไม่มีประวัติในช่วงเวลานี้</p></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="empty-state">ยังไม่มีประวัติในช่วงเวลานี้</div>', unsafe_allow_html=True)
         return
-
-    # ── summary cards ──
     total_bar = total_rod = 0
     for _, ad in analyses:
         for det in ad.get("data", {}).get("results", {}).values():
             for k, v in det.items():
-                if k == "avg_confident":
-                    continue
-                if "กล่อง" in k:
-                    total_bar += v
-                elif "เส้น" in k:
-                    total_rod += v
-
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        st.markdown(f'<div class="se-card"><p class="se-stat-num">{len(analyses)}</p>'
-                    '<p class="se-stat-label">ครั้งที่ตรวจ</p></div>', unsafe_allow_html=True)
-    with s2:
-        st.markdown(f'<div class="se-card"><p class="se-stat-num" style="color:#E07B00!important;">{total_bar}</p>'
-                    '<p class="se-stat-label">เหล็กกล่องรวม (ชิ้น)</p></div>', unsafe_allow_html=True)
-    with s3:
-        st.markdown(f'<div class="se-card"><p class="se-stat-num" style="color:#2563EB!important;">{total_rod}</p>'
-                    '<p class="se-stat-label">เหล็กเส้นรวม (ชิ้น)</p></div>', unsafe_allow_html=True)
-
-    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-    # ── table ──
-    st.markdown("""
-    <div class="hist-head">
-        <span>วันที่ / เวลา</span><span>ไฟล์</span>
-        <span>เหล็กกล่อง</span><span>เหล็กเส้น</span><span>ความแม่นยำ</span>
+                if k == "avg_confident": continue
+                if "กล่อง" in k: total_bar += v
+                elif "เส้น" in k: total_rod += v
+    st.markdown(f"""
+    <div class="summary-row">
+        <div class="summary-card"><div class="summary-n n-white">{len(analyses)}</div><div class="summary-l">ครั้งที่ตรวจ</div></div>
+        <div class="summary-card"><div class="summary-n n-orange">{total_bar}</div><div class="summary-l">เหล็กกล่อง</div></div>
+        <div class="summary-card"><div class="summary-n n-blue">{total_rod}</div><div class="summary-l">เหล็กเส้น</div></div>
     </div>
     """, unsafe_allow_html=True)
-
-    for ts, analysis_data in analyses:
-        record   = analysis_data.get("data", {})
-        filename = record.get("filename", "—")
-        results  = record.get("results",  {})
-
-        bar_cnt = rod_cnt = 0
-        conf_vals = []
+    rows = ""
+    for ts, ad in analyses:
+        rec = ad.get("data", {}); fname = rec.get("filename", "—"); results = rec.get("results", {})
+        bar = rod = 0; confs = []
         for det in results.values():
             c = det.get("avg_confident", 0)
-            if c > 0:
-                conf_vals.append(c)
+            if c: confs.append(c)
             for k, v in det.items():
-                if k == "avg_confident":
-                    continue
-                if "กล่อง" in k:
-                    bar_cnt += v
-                elif "เส้น" in k:
-                    rod_cnt += v
-
-        avg_conf    = sum(conf_vals) / len(conf_vals) if conf_vals else 0
-        date_str    = datetime.fromisoformat(ts).strftime("%d/%m/%y %H:%M")
-        fname_short = filename if len(filename) <= 30 else filename[:27] + "…"
-        bar_cell    = f'<span class="chip-bar">{bar_cnt}</span>' if bar_cnt else '<span style="color:#444!important;">—</span>'
-        rod_cell    = f'<span class="chip-rod">{rod_cnt}</span>'  if rod_cnt else '<span style="color:#444!important;">—</span>'
-
-        st.markdown(f"""
-        <div class="hist-row">
-            <span style="color:#999!important;font-size:12px;">{date_str}</span>
-            <span style="color:#C8C8C8!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                  title="{filename}">{fname_short}</span>
-            <span>{bar_cell}</span>
-            <span>{rod_cell}</span>
-            <span style="color:#888!important;">{avg_conf:.0%}</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-    # ── download ──
+                if k == "avg_confident": continue
+                if "กล่อง" in k: bar += v
+                elif "เส้น" in k: rod += v
+        conf = sum(confs) / len(confs) if confs else 0
+        dstr = datetime.fromisoformat(ts).strftime("%d/%m/%y %H:%M")
+        fshort = fname[:28] + "…" if len(fname) > 28 else fname
+        btag = f'<span class="tag tag-bar">กล่อง {bar}</span>' if bar else '<span style="color:rgba(240,240,240,0.2)">—</span>'
+        rtag = f'<span class="tag tag-rod">เส้น {rod}</span>' if rod else '<span style="color:rgba(240,240,240,0.2)">—</span>'
+        rows += f"""<div class="hist-row">
+            <span class="hist-time">{dstr}</span>
+            <span class="hist-file" title="{fname}">{fshort}</span>
+            <span>{btag}</span><span>{rtag}</span>
+            <span class="hist-conf">{conf:.0%}</span>
+        </div>"""
+    st.markdown(f"""<div class="hist-table">
+        <div class="hist-head"><span>วันที่</span><span>ไฟล์</span><span>กล่อง</span><span>เส้น</span><span>แม่นยำ</span></div>
+        {rows}
+    </div>""", unsafe_allow_html=True)
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
     last_ts, last_ad = analyses[0]
     last_results = last_ad.get("data", {}).get("results", {})
-    saved_imgs   = load_output_images_for_history(last_results)
-
-    c_dl, _ = st.columns([1, 3])
-    with c_dl:
-        st.download_button(
-            label="ดาวน์โหลดล่าสุด (ZIP)",
-            data=build_zip(saved_imgs, last_results, "history_latest"),
-            file_name=f"steel_eye_{last_ts[:10]}.zip",
-            mime="application/zip",
-            key="dl_hist_latest",
-            use_container_width=True,
-        )
-
-    with st.expander("ดาวน์โหลดรายการอื่น"):
-        for ts, analysis_data in analyses:
-            record     = analysis_data.get("data", {})
-            filename   = record.get("filename", "—")
-            results    = record.get("results",  {})
-            dt_obj     = datetime.fromisoformat(ts)
-            saved_imgs = load_output_images_for_history(results)
-            img_note   = f"{len(saved_imgs)} ภาพ" if saved_imgs else "JSON only"
+    saved = load_history_imgs(last_results)
+    c1, _ = st.columns([1, 3])
+    with c1:
+        st.download_button("ดาวน์โหลดล่าสุด (ZIP)", build_zip(saved, last_results, "latest"),
+                           file_name=f"steel_eye_{last_ts[:10]}.zip", mime="application/zip", key="dl_latest", use_container_width=True)
+    with st.expander("รายการอื่น"):
+        for ts, ad in analyses:
+            rec = ad.get("data", {}); fname = rec.get("filename", "—"); results = rec.get("results", {})
+            saved = load_history_imgs(results)
             c1, c2, c3 = st.columns([2, 1, 1])
-            with c1:
-                st.caption(f"{dt_obj.strftime('%d/%m/%y %H:%M')}  —  {filename}")
-            with c2:
-                st.caption(img_note)
-            with c3:
-                st.download_button(
-                    label="โหลด ZIP",
-                    data=build_zip(saved_imgs, results, f"history_{ts[:10]}"),
-                    file_name=f"steel_eye_{ts[:10]}_{ts[11:13]}{ts[14:16]}.zip",
-                    mime="application/zip",
-                    key=f"dl_hist_{ts}",
-                    use_container_width=True,
-                )
+            with c1: st.caption(f"{datetime.fromisoformat(ts).strftime('%d/%m/%y %H:%M')} — {fname}")
+            with c2: st.caption(f"{len(saved)} ภาพ" if saved else "JSON only")
+            with c3: st.download_button("ZIP", build_zip(saved, results, f"h_{ts[:10]}"),
+                                        file_name=f"steel_eye_{ts[:10]}_{ts[11:13]}{ts[14:16]}.zip",
+                                        mime="application/zip", key=f"dl_{ts}", use_container_width=True)
 
 
 def page_settings():
-    st.markdown('<p class="se-title">ตั้งค่าบัญชี</p>', unsafe_allow_html=True)
-
-    col_acc, col_pwd = st.columns(2)
+    st.markdown('<div class="page-header"><div class="page-title">บัญชี</div></div>', unsafe_allow_html=True)
+    col_l, col_r = st.columns(2)
     udata = st.session_state.user_data
-
-    with col_acc:
-        st.markdown("#### ข้อมูลบัญชี")
+    with col_l:
+        st.markdown('<div class="section-title">ข้อมูล</div>', unsafe_allow_html=True)
         st.markdown(f"""
-        <div class="se-card">
-            <p style="color:#555!important;font-size:12px;margin:0 0 2px;">ชื่อผู้ใช้</p>
-            <p style="color:#F0F0F0!important;margin:0 0 14px;font-weight:600;">{st.session_state.username}</p>
-            <p style="color:#555!important;font-size:12px;margin:0 0 2px;">ชื่อ-นามสกุล</p>
-            <p style="color:#F0F0F0!important;margin:0 0 14px;font-weight:600;">{udata['full_name']}</p>
-            <p style="color:#555!important;font-size:12px;margin:0 0 2px;">สมัครเมื่อ</p>
-            <p style="color:#F0F0F0!important;margin:0;font-weight:600;">{udata['created_at'][:10]}</p>
-        </div>
+        <div class="acct-row"><span class="acct-key">ชื่อผู้ใช้</span><span class="acct-val">{st.session_state.username}</span></div>
+        <div class="acct-row"><span class="acct-key">ชื่อ-นามสกุล</span><span class="acct-val">{udata['full_name']}</span></div>
+        <div class="acct-row" style="border:none"><span class="acct-key">สมัครเมื่อ</span><span class="acct-val">{udata['created_at'][:10]}</span></div>
         """, unsafe_allow_html=True)
-
-    with col_pwd:
-        st.markdown("#### เปลี่ยนรหัสผ่าน")
-        old_p  = st.text_input("รหัสผ่านเดิม",      type="password", key="pwd_old")
-        new_p  = st.text_input("รหัสผ่านใหม่",       type="password", key="pwd_new")
+    with col_r:
+        st.markdown('<div class="section-title">เปลี่ยนรหัสผ่าน</div>', unsafe_allow_html=True)
+        old_p = st.text_input("รหัสผ่านเดิม", type="password", key="pwd_old")
+        new_p = st.text_input("รหัสผ่านใหม่", type="password", key="pwd_new")
+        if new_p:
+            st.markdown(pwd_strength_html(new_p), unsafe_allow_html=True)
         conf_p = st.text_input("ยืนยันรหัสผ่านใหม่", type="password", key="pwd_conf")
-        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-        if st.button("บันทึก", use_container_width=True, key="btn_update_pwd"):
-            if not (old_p and new_p and conf_p):
-                st.warning("กรุณากรอกข้อมูลให้ครบ")
-            elif new_p != conf_p:
-                st.error("รหัสผ่านใหม่ไม่ตรงกัน")
+        if new_p and conf_p:
+            if new_p == conf_p:
+                st.markdown('<div class="match-ok">✓ ตรงกัน</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="match-no">✗ ไม่ตรงกัน</div>', unsafe_allow_html=True)
+        if st.button("บันทึก", key="btn_pwd"):
+            if not (old_p and new_p and conf_p): st.warning("กรุณากรอกข้อมูลให้ครบ")
+            elif new_p != conf_p: st.error("รหัสผ่านใหม่ไม่ตรงกัน")
+            elif len(new_p) < 6: st.error("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
             else:
                 res = auth.change_password(st.session_state.username, old_p, new_p)
-                if res["success"]:
-                    st.success("เปลี่ยนรหัสผ่านสำเร็จ")
-                else:
-                    st.error(res["message"])
+                st.success("เปลี่ยนรหัสผ่านสำเร็จ") if res["success"] else st.error(res["message"])
 
 
-# ─────────────────────────────────────────────────────────────
-# MAIN APP
-# ─────────────────────────────────────────────────────────────
 def show_main_app():
     with st.sidebar:
+        st.markdown('<div class="brand"><div class="brand-dot"></div><span class="brand-name">Steel Eye</span></div>', unsafe_allow_html=True)
+        page = st.radio("", ["ตรวจนับ", "ประวัติ", "บัญชี"], key="nav", label_visibility="collapsed")
+        st.divider()
         udata = st.session_state.user_data
-        st.markdown(f"""
-        <div class="se-card" style="margin-bottom:16px;">
-            <p style="font-weight:700;font-size:15px;color:#F0F0F0!important;margin:0;">{udata['full_name']}</p>
-            <p style="font-size:12px;color:#555!important;margin:4px 0 0 0;">@{st.session_state.username}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        page = st.radio("เมนู", ["หน้าหลัก", "ประวัติ", "ตั้งค่า"], label_visibility="collapsed")
-        st.divider()
-
-        all_analyses = auth.get_user_analyses(st.session_state.username)
-        today_count  = sum(
-            1 for ts, _ in all_analyses
-            if datetime.fromisoformat(ts).date() == datetime.now().date()
-        )
-        st.markdown(f"""
-        <div style="padding:0 4px;">
-            <p style="font-size:11px;color:#555!important;margin:0 0 2px;">วันนี้</p>
-            <p style="font-size:22px;font-weight:700;color:#E07B00!important;margin:0;">{today_count}</p>
-            <p style="font-size:11px;color:#555!important;margin:10px 0 2px;">ทั้งหมด</p>
-            <p style="font-size:16px;font-weight:600;color:#C8C8C8!important;margin:0;">{len(all_analyses)}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.divider()
-
-        if st.button("ออกจากระบบ", use_container_width=True, key="btn_logout"):
-            for k in ["authenticated", "username", "user_data", "model",
-                      "main_system", "unique_runtime",
-                      "home_result_images", "home_result_raw"]:
+        st.markdown(f'<div class="user-info"><div class="user-name">{udata["full_name"]}</div><div class="user-handle">@{st.session_state.username}</div></div>', unsafe_allow_html=True)
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        if st.button("ออกจากระบบ", key="btn_logout"):
+            for k in ["authenticated", "username", "user_data", "model", "main_system", "unique_runtime", "home_imgs", "home_raw"]:
                 st.session_state.pop(k, None)
             st.rerun()
 
-    st.markdown(
-        '<h2 style="color:#E07B00!important;font-size:24px;font-weight:800;'
-        'letter-spacing:-0.5px;margin-bottom:20px;">Steel Eye</h2>',
-        unsafe_allow_html=True,
-    )
-
-    if page == "หน้าหลัก":
-        page_home()
-    elif page == "ประวัติ":
-        page_history()
-    elif page == "ตั้งค่า":
-        page_settings()
+    if page == "ตรวจนับ":   page_home()
+    elif page == "ประวัติ":  page_history()
+    elif page == "บัญชี":    page_settings()
 
 
-# ─────────────────────────────────────────────────────────────
-# ENTRY POINT
-# ─────────────────────────────────────────────────────────────
 def main():
     if not st.session_state.authenticated:
         show_login_page()

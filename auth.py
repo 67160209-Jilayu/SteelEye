@@ -1,295 +1,268 @@
 """
-auth.py - Authentication System for Steel Eye
-ระบบ login สำหรับ Steel Eye
-- สนับสนุน multi-user
-- เก็บ user data แยก
-- Session management
+auth.py — Steel Eye
+ระบบ Authentication เชื่อมต่อ Supabase (PostgreSQL)
 """
 
-import json
-import os
-from datetime import datetime
 import hashlib
+import re
+import streamlit as st
+import psycopg2
+import psycopg2.extras
+from datetime import datetime, timedelta
+import json
+
+
+def _get_conn():
+    s = st.secrets["supabase"]
+    return psycopg2.connect(
+        host=str(s["host"]),
+        port=int(s["port"]),
+        dbname=str(s["dbname"]),
+        user=str(s["user"]),
+        password=str(s["password"])
+    )
+
+
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _sanitize_username(username: str) -> str:
+    """อนุญาตเฉพาะ a-z, A-Z, 0-9, _ และ - เท่านั้น"""
+    return re.sub(r"[^\w\-]", "", username)
+
 
 class AuthManager:
-    """จัดการ authentication และ user data"""
-    
-    def __init__(self, db_file="users.json"):
-        self.db_file = db_file
-        self._ensure_db()
-    
-    def _ensure_db(self):
-        """สร้าง database file ถ้ายังไม่มี"""
-        if not os.path.exists(self.db_file):
-            with open(self.db_file, "w") as f:
-                json.dump({}, f)
-    
-    def _hash_password(self, password):
-        """Hash password ด้วย SHA256"""
-        return hashlib.sha256(password.encode()).hexdigest()
-    
-    def _load_users(self):
-        """โหลด users จาก database"""
-        try:
-            with open(self.db_file, "r") as f:
-                return json.load(f)
-        except:
-            return {}
-    
-    def _save_users(self, users):
-        """บันทึก users ลง database"""
-        with open(self.db_file, "w") as f:
-            json.dump(users, f, indent=4)
-    
-    def register(self, username, password, full_name=""):
-        """สมัครสมาชิก
-        
-        Args:
-            username: ชื่อผู้ใช้ (unique)
-            password: รหัสผ่าน
-            full_name: ชื่อเต็ม (optional)
-        
-        Returns:
-            dict: {"success": bool, "message": str}
-        """
-        users = self._load_users()
-        
-        # ตรวจสอบว่า username มีอยู่แล้ว
-        if username in users:
-            return {
-                "success": False,
-                "message": "Username already exists"
-            }
-        
-        # ตรวจสอบ username length
+    def __init__(self, db_file=None):
+        pass
+
+    # ──────────────────────────────────────────
+    # AUTH
+    # ──────────────────────────────────────────
+    def register(self, username: str, password: str, full_name: str = "") -> dict:
+        # trim whitespace
+        username  = username.strip()
+        full_name = full_name.strip()
+
+        # validation
         if len(username) < 3:
-            return {
-                "success": False,
-                "message": "Username must be at least 3 characters"
-            }
-        
-        # ตรวจสอบ password length
+            return {"success": False, "message": "Username ต้องมีอย่างน้อย 3 ตัวอักษร"}
+        if len(username) > 30:
+            return {"success": False, "message": "Username ยาวเกินไป (สูงสุด 30 ตัวอักษร)"}
+
+        # sanitize — ป้องกัน username แปลกๆ
+        clean = _sanitize_username(username)
+        if clean != username:
+            return {"success": False, "message": "Username ใช้ได้เฉพาะตัวอักษร ตัวเลข _ และ -"}
+
         if len(password) < 6:
-            return {
-                "success": False,
-                "message": "Password must be at least 6 characters"
-            }
-        
-        # เก็บ user data
-        users[username] = {
-            "password": self._hash_password(password),
-            "full_name": full_name,
-            "created_at": datetime.now().isoformat(),
-            "last_login": None,
-            "analyses": {}  # เก็บประวัติ analysis ของ user นี้
-        }
-        
-        self._save_users(users)
-        
-        return {
-            "success": True,
-            "message": f"User '{username}' registered successfully"
-        }
-    
-    def login(self, username, password):
-        """เข้าสู่ระบบ
-        
-        Args:
-            username: ชื่อผู้ใช้
-            password: รหัสผ่าน
-        
-        Returns:
-            dict: {"success": bool, "message": str, "user_data": dict or None}
-        """
-        users = self._load_users()
-        
-        # ตรวจสอบว่า username มีอยู่
-        if username not in users:
-            return {
-                "success": False,
-                "message": "Username not found"
-            }
-        
-        # ตรวจสอบ password
-        user = users[username]
-        if user["password"] != self._hash_password(password):
-            return {
-                "success": False,
-                "message": "Incorrect password"
-            }
-        
-        # Update last login
-        user["last_login"] = datetime.now().isoformat()
-        self._save_users(users)
-        
-        return {
-            "success": True,
-            "message": f"Welcome {user.get('full_name', username)}!",
-            "user_data": {
-                "username": username,
-                "full_name": user.get("full_name", username),
-                "created_at": user["created_at"]
-            }
-        }
-    
-    def save_user_analysis(self, username, analysis_data):
-        """บันทึก analysis สำหรับ user
-        
-        Args:
-            username: ชื่อผู้ใช้
-            analysis_data: dict ของ analysis
-        """
-        users = self._load_users()
-        
-        if username not in users:
-            return {"success": False, "message": "User not found"}
-        
-        timestamp = datetime.now().isoformat()
-        
-        # เก็บ analysis พร้อม timestamp
-        users[username]["analyses"][timestamp] = {
-            "data": analysis_data,
-            "timestamp": timestamp
-        }
-        
-        self._save_users(users)
-        
-        return {
-            "success": True,
-            "message": "Analysis saved"
-        }
-    
-    def get_user_analyses(self, username, days=None):
-        """ดึง analyses ของ user
-        
-        Args:
-            username: ชื่อผู้ใช้
-            days: กี่วันที่ผ่านมา (None = ทั้งหมด)
-        
-        Returns:
-            list: list ของ analyses
-        """
-        from datetime import datetime, timedelta
-        
-        users = self._load_users()
-        
-        if username not in users:
-            return []
-        
-        analyses = users[username].get("analyses", {})
-        
-        # ถ้ากำหนด days ให้ filter เฉพาะช่วงวันนั้น
-        if days:
-            cutoff_date = datetime.now() - timedelta(days=days)
-            filtered = {}
-            
-            for timestamp, data in analyses.items():
-                try:
-                    dt = datetime.fromisoformat(timestamp)
-                    if dt >= cutoff_date:
-                        filtered[timestamp] = data
-                except:
-                    pass
-            
-            return sorted(
-                filtered.items(),
-                key=lambda x: x[0],
-                reverse=True
+            return {"success": False, "message": "Password ต้องมีอย่างน้อย 6 ตัวอักษร"}
+        if len(password) > 128:
+            return {"success": False, "message": "Password ยาวเกินไป"}
+        if not full_name:
+            return {"success": False, "message": "กรุณากรอกชื่อ-นามสกุล"}
+        if len(full_name) > 100:
+            return {"success": False, "message": "ชื่อ-นามสกุลยาวเกินไป"}
+
+        conn = None
+        try:
+            conn = _get_conn()
+            cur  = conn.cursor()
+
+            cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
+            if cur.fetchone():
+                return {"success": False, "message": "Username นี้มีอยู่แล้ว"}
+
+            cur.execute(
+                """INSERT INTO users (username, password_hash, full_name, created_at)
+                   VALUES (%s, %s, %s, %s)""",
+                (username, _hash_password(password), full_name, datetime.now().isoformat()),
             )
-        
-        return sorted(
-            analyses.items(),
-            key=lambda x: x[0],
-            reverse=True
-        )
-    
-    def get_user_analyses_by_date_range(self, username, start_date, end_date):
-        """ดึง analyses ในช่วงวันที่เฉพาะ
-        
-        Args:
-            username: ชื่อผู้ใช้
-            start_date: วันเริ่มต้น (datetime object)
-            end_date: วันสิ้นสุด (datetime object)
-        
-        Returns:
-            list: list ของ analyses ในช่วงนั้น
-        """
-        from datetime import datetime
-        
-        users = self._load_users()
-        
-        if username not in users:
+            conn.commit()
+            return {"success": True, "message": "สมัครสมาชิกสำเร็จ"}
+
+        except Exception as e:
+            return {"success": False, "message": f"เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง"}
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def login(self, username: str, password: str) -> dict:
+        username = username.strip()
+
+        if not username or not password:
+            return {"success": False, "message": "กรุณากรอกข้อมูลให้ครบ"}
+
+        conn = None
+        try:
+            conn = _get_conn()
+            cur  = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+            cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+
+            # ใช้ข้อความเดียวกันเพื่อป้องกัน username enumeration
+            if not user or user["password_hash"] != _hash_password(password):
+                return {"success": False, "message": "Username หรือรหัสผ่านไม่ถูกต้อง"}
+
+            cur.execute(
+                "UPDATE users SET last_login = %s WHERE username = %s",
+                (datetime.now().isoformat(), username),
+            )
+            conn.commit()
+            return {
+                "success": True,
+                "message": f"ยินดีต้อนรับ {user['full_name']}",
+                "user_data": {
+                    "username":   username,
+                    "full_name":  user["full_name"],
+                    "created_at": user["created_at"],
+                },
+            }
+
+        except Exception as e:
+            return {"success": False, "message": "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง"}
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def change_password(self, username: str, old_password: str, new_password: str) -> dict:
+        if len(new_password) < 6:
+            return {"success": False, "message": "รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร"}
+        if len(new_password) > 128:
+            return {"success": False, "message": "รหัสผ่านยาวเกินไป"}
+        if old_password == new_password:
+            return {"success": False, "message": "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม"}
+
+        conn = None
+        try:
+            conn = _get_conn()
+            cur  = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+            cur.execute("SELECT password_hash FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+            if not user:
+                return {"success": False, "message": "ไม่พบ user"}
+            if user["password_hash"] != _hash_password(old_password):
+                return {"success": False, "message": "รหัสผ่านเดิมไม่ถูกต้อง"}
+
+            cur.execute(
+                "UPDATE users SET password_hash = %s WHERE username = %s",
+                (_hash_password(new_password), username),
+            )
+            conn.commit()
+            return {"success": True, "message": "เปลี่ยนรหัสผ่านสำเร็จ"}
+
+        except Exception as e:
+            return {"success": False, "message": "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง"}
+        finally:
+            if conn is not None:
+                conn.close()
+
+    # ──────────────────────────────────────────
+    # ANALYSES
+    # ──────────────────────────────────────────
+    def save_user_analysis(self, username: str, analysis_data: dict) -> dict:
+        conn = None
+        try:
+            conn = _get_conn()
+            cur  = conn.cursor()
+
+            # จำกัด filename ไม่ให้ยาวเกิน
+            filename = str(analysis_data.get("filename", ""))[:500]
+
+            cur.execute(
+                """INSERT INTO analyses (username, filename, results, timestamp)
+                   VALUES (%s, %s, %s, %s)""",
+                (
+                    username,
+                    filename,
+                    json.dumps(analysis_data.get("results", {}), ensure_ascii=False),
+                    analysis_data.get("timestamp", datetime.now().isoformat()),
+                ),
+            )
+            conn.commit()
+            return {"success": True}
+
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def get_user_analyses(self, username: str, days: int = None) -> list:
+        conn = None
+        try:
+            conn = _get_conn()
+            cur  = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+            if days:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+                cur.execute(
+                    """SELECT timestamp, filename, results FROM analyses
+                       WHERE username = %s AND timestamp >= %s
+                       ORDER BY timestamp DESC LIMIT 500""",
+                    (username, cutoff),
+                )
+            else:
+                cur.execute(
+                    """SELECT timestamp, filename, results FROM analyses
+                       WHERE username = %s
+                       ORDER BY timestamp DESC LIMIT 500""",
+                    (username,),
+                )
+
+            rows = cur.fetchall()
+            return [
+                (
+                    row["timestamp"],
+                    {"data": {
+                        "filename":  row["filename"],
+                        "results":   row["results"] if isinstance(row["results"], dict)
+                        else json.loads(row["results"]),
+                        "timestamp": row["timestamp"],
+                    }},
+                )
+                for row in rows
+            ]
+
+        except Exception as e:
+            st.error(f"โหลดประวัติไม่ได้: {e}")
             return []
-        
-        analyses = users[username].get("analyses", {})
-        filtered = {}
-        
-        for timestamp, data in analyses.items():
-            try:
-                dt = datetime.fromisoformat(timestamp)
-                if start_date <= dt <= end_date:
-                    filtered[timestamp] = data
-            except:
-                pass
-        
-        return sorted(
-            filtered.items(),
-            key=lambda x: x[0],
-            reverse=True
-        )
-    
-    def get_all_usernames(self):
-        """ดึงรายชื่อ users ทั้งหมด"""
-        return list(self._load_users().keys())
-    
-    def user_exists(self, username):
-        """ตรวจสอบว่า user มีอยู่หรือไม่"""
-        users = self._load_users()
-        return username in users
-    
-    def delete_user(self, username):
-        """ลบ user"""
-        users = self._load_users()
-        
-        if username in users:
-            del users[username]
-            self._save_users(users)
-            return {"success": True, "message": "User deleted"}
-        
-        return {"success": False, "message": "User not found"}
-    
-    def change_password(self, username, old_password, new_password):
-        """เปลี่ยนรหัสผ่าน"""
-        users = self._load_users()
-        
-        if username not in users:
-            return {"success": False, "message": "User not found"}
-        
-        user = users[username]
-        
-        # ตรวจสอบ old password
-        if user["password"] != self._hash_password(old_password):
-            return {"success": False, "message": "Incorrect current password"}
-        
-        # Update password
-        user["password"] = self._hash_password(new_password)
-        self._save_users(users)
-        
-        return {"success": True, "message": "Password changed successfully"}
+        finally:
+            if conn is not None:
+                conn.close()
 
+    def get_user_analyses_by_date_range(
+            self, username: str, start_date: datetime, end_date: datetime
+    ) -> list:
+        conn = None
+        try:
+            conn = _get_conn()
+            cur  = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute(
+                """SELECT timestamp, filename, results FROM analyses
+                   WHERE username = %s AND timestamp >= %s AND timestamp <= %s
+                   ORDER BY timestamp DESC LIMIT 500""",
+                (username, start_date.isoformat(), end_date.isoformat()),
+            )
+            rows = cur.fetchall()
+            return [
+                (
+                    row["timestamp"],
+                    {"data": {
+                        "filename":  row["filename"],
+                        "results":   row["results"] if isinstance(row["results"], dict)
+                        else json.loads(row["results"]),
+                        "timestamp": row["timestamp"],
+                    }},
+                )
+                for row in rows
+            ]
 
-# Demo usage
-if __name__ == "__main__":
-    auth = AuthManager()
-    
-    # Register
-    print(auth.register("john", "password123", "John Doe"))
-    
-    # Login
-    print(auth.login("john", "password123"))
-    
-    # Save analysis
-    print(auth.save_user_analysis("john", {"detection": "test"}))
-    
-    # Get analyses
-    print(auth.get_user_analyses("john"))
+        except Exception as e:
+            st.error(f"โหลดประวัติไม่ได้: {e}")
+            return []
+        finally:
+            if conn is not None:
+                conn.close()
