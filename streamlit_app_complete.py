@@ -630,10 +630,6 @@ def page_about():
         <div class="tip-text"><b>มุมตั้งฉาก</b><br>ถ่ายจากมุมตรงเหนือกองเหล็ก ได้ผลแม่นยำกว่ามุมเฉียง</div>
       </div>
       <div class="tip-card">
-        <div class="tip-icon">✂️</div>
-        <div class="tip-text"><b>ใช้ Crop</b><br>ตัดพื้นหลังออกให้เหลือแต่เหล็ก ลดการนับผิดพลาด</div>
-      </div>
-      <div class="tip-card">
         <div class="tip-icon">📁</div>
         <div class="tip-text"><b>หลายไฟล์พร้อมกัน</b><br>อัปโหลดได้สูงสุด 10 ไฟล์ต่อครั้งสำหรับการนับแบบ batch</div>
       </div>
