@@ -20,7 +20,7 @@ class MainSystem:
     def predict_all_and_save(self , list_image : list[str]) -> list[str]:
         images_path : list[str] = []
         for i in list_image:
-            images_path.append(self.input_basket + "/" + i)
+           images_path.append(self.input_basket + "/" + i)
 
         history : dict[str , dict]= {}
         results_list = self.model.predict(source=images_path ,conf=self.precision)
@@ -28,8 +28,7 @@ class MainSystem:
         for i , result in enumerate(results_list):
             boxes = result.boxes
             avg_confident = []
-            # ใช้ basename แทน hardcode [19:] เพื่อรองรับ path ยาวทุกรูปแบบ
-            image_name = os.path.basename(images_path[i])
+            image_name = images_path[i][19:]
             history.update({image_name: {}})
 
             for box in boxes:
@@ -144,3 +143,4 @@ class UniqueRuntimeSystem:
 
             self.runtime.history = user_history[runtime_id]["history"]
             self.runtime.precision = user_history[runtime_id]["precision"]
+
