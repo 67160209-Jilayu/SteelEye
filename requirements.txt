@@ -1,6 +1,5 @@
-streamlit>=1.32.0
-opencv-python-headless>=4.8.0
-ultralytics>=8.4.21
-Pillow>=10.0.0
-numpy>=1.26.3
-psycopg2-binary>=2.9.9
+streamlit
+opencv-python-headless
+ultralytics
+Pillow
+numpy
